@@ -1,5 +1,8 @@
 mod board;
 mod db;
+mod mode;
+mod solver;
+mod no_guess;
 
 use board::{Board, GameStatus, CellState};
 use eframe::egui;
@@ -34,11 +37,13 @@ enum AppScreen {
     Profiles,
     Statistics,
     Achievements,
+    GameModes,
 }
 
 struct MineShiftApp {
     screen: AppScreen,
     board: Board,
+    mode_state: mode::ModeState,
     db: Option<db::Database>,
     active_profile: Option<db::Profile>,
     profiles: Vec<db::Profile>,
@@ -67,6 +72,7 @@ impl MineShiftApp {
         Self {
             screen,
             board: Board::new_square(9, 9, 10),
+            mode_state: mode::ModeState::new(mode::GameModeId::Classic),
             db,
             active_profile,
             profiles,
@@ -112,26 +118,12 @@ impl MineShiftApp {
             
             ui.add_space(60.0);
             
-            ui.style_mut().spacing.button_padding = egui::vec2(32.0, 16.0);
-            
-            let play_square = egui::Button::new(
-                egui::RichText::new("PLAY SQUARE").size(24.0).color(egui::Color32::from_rgb(0xFF, 0xD6, 0xA8))
+            let play_btn = egui::Button::new(
+                egui::RichText::new("PLAY - GAME MODES").size(24.0).color(egui::Color32::from_rgb(0xFF, 0xD6, 0xA8))
             ).fill(egui::Color32::from_rgb(0x79, 0x65, 0xBE)).min_size(egui::vec2(300.0, 54.0));
             
-            if ui.add(play_square).clicked() {
-                self.board = Board::new_square(16, 16, 40);
-                self.screen = AppScreen::Gameplay;
-            }
-            
-            ui.add_space(16.0);
-            
-            let play_hex = egui::Button::new(
-                egui::RichText::new("PLAY HEXAGON").size(24.0).color(egui::Color32::from_rgb(0xFF, 0xD6, 0xA8))
-            ).fill(egui::Color32::from_rgb(0x79, 0x65, 0xBE)).min_size(egui::vec2(300.0, 54.0));
-            
-            if ui.add(play_hex).clicked() {
-                self.board = Board::new_hex(8, 40);
-                self.screen = AppScreen::Gameplay;
+            if ui.add(play_btn).clicked() {
+                self.screen = AppScreen::GameModes;
             }
             
             ui.add_space(32.0);
@@ -202,15 +194,36 @@ impl MineShiftApp {
                 
                 let elapsed = if let Some(end) = self.board.end_time {
                     if let Some(start) = self.board.start_time {
-                        end.duration_since(start).as_secs()
-                    } else { 0 }
+                        end.duration_since(start).as_secs_f64()
+                    } else { 0.0 }
                 } else if let Some(start) = self.board.start_time {
-                    std::time::Instant::now().duration_since(start).as_secs()
-                } else { 0 };
+                    std::time::Instant::now().duration_since(start).as_secs_f64()
+                } else { 0.0 };
 
-                ui.label(egui::RichText::new(format!("⏱ {:03}", elapsed)).size(24.0).strong().color(egui::Color32::from_rgb(0x30, 0x30, 0x38)));
+                let time_display = if let Some(limit) = self.mode_state.time_limit_sec {
+                    let remaining = (limit - elapsed).max(0.0);
+                    if remaining <= 0.0 && self.board.status == GameStatus::Playing {
+                        self.board.status = GameStatus::Lost;
+                        self.board.end_time = Some(std::time::Instant::now());
+                    }
+                    format!("⏱ {:03.0}", remaining)
+                } else {
+                    format!("⏱ {:03.0}", elapsed)
+                };
+
+                ui.label(egui::RichText::new(time_display).size(24.0).strong().color(egui::Color32::from_rgb(0x30, 0x30, 0x38)));
                 
                 ui.add_space(20.0);
+                
+                if matches!(self.mode_state.id, mode::GameModeId::Blitz | mode::GameModeId::Sandbox) {
+                    ui.label(egui::RichText::new(format!("⭐ {}", self.mode_state.score)).size(24.0).strong().color(egui::Color32::from_rgb(0x79, 0x65, 0xBE)));
+                    ui.add_space(20.0);
+                }
+                
+                if matches!(self.mode_state.id, mode::GameModeId::Survival | mode::GameModeId::Expedition) {
+                    ui.label(egui::RichText::new(format!("❤️ {}", self.mode_state.lives)).size(24.0).strong().color(egui::Color32::from_rgb(0xE8, 0x5C, 0x60)));
+                    ui.add_space(20.0);
+                }
                 
                 let mines_left = self.board.mine_count as isize - self.board.flags_placed as isize;
                 ui.label(egui::RichText::new(format!("🚩 {}", mines_left)).size(24.0).strong().color(egui::Color32::from_rgb(0xE8, 0x5C, 0x60)));
@@ -230,6 +243,25 @@ impl MineShiftApp {
                             board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
                             board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
                         };
+                        self.board.is_no_guess = self.mode_state.id == mode::GameModeId::NoGuess;
+                    }
+                    
+                    if self.mode_state.id == mode::GameModeId::Zen && self.board.status == GameStatus::Playing {
+                        if ui.button(egui::RichText::new("Hint").size(18.0)).clicked() {
+                            let deductions = solver::Solver::deduce(&self.board);
+                            for d in deductions {
+                                match d {
+                                    solver::Deduction::Safe(x, y) => {
+                                        let idx = self.board.get_index(x, y);
+                                        self.board.cells[idx].state = CellState::Revealed;
+                                    }
+                                    solver::Deduction::Mine(x, y) => {
+                                        let idx = self.board.get_index(x, y);
+                                        self.board.cells[idx].state = CellState::Flagged;
+                                    }
+                                }
+                            }
+                        }
                     }
                 });
             });
@@ -392,43 +424,118 @@ impl MineShiftApp {
                     if let Some((x, y)) = middle_clicked_cell { self.board.chord(x, y); }
                     
                     if old_status == GameStatus::Playing && self.board.status != GameStatus::Playing {
-                        if let (Some(db), Some(profile)) = (&self.db, &self.active_profile) {
-                            let duration_ms = if let (Some(s), Some(e)) = (self.board.start_time, self.board.end_time) {
-                                e.duration_since(s).as_millis() as i64
-                            } else { 0 };
-                            let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64 - (duration_ms / 1000);
-                            
-                            let session = db::GameSession {
-                                profile_id: profile.id,
-                                mode: "Classic".to_string(),
-                                geometry: match self.board.geometry { board::Geometry::Square => "Square".to_string(), board::Geometry::Hex => "Hex".to_string() },
-                                board_width: self.board.width as i64,
-                                board_height: self.board.height as i64,
-                                hex_radius: self.board.radius as i64,
-                                mine_count: self.board.mine_count as i64,
-                                started_at,
-                                duration_ms,
-                                result: match self.board.status { GameStatus::Won => "Won".to_string(), _ => "Lost".to_string() }
-                            };
-                            let _ = db.save_session(&session);
-                            let _ = db.add_stat(profile.id, "total_playtime_s", duration_ms / 1000);
-                            
-                            if self.board.status == GameStatus::Won {
-                                let _ = db.add_xp(profile.id, 50);
-                                if self.board.geometry == board::Geometry::Square {
-                                    let _ = db.set_best_time(profile.id, "best_time_square", duration_ms / 1000);
-                                    let _ = db.unlock_achievement(profile.id, "first_win");
-                                    if self.board.mine_count >= 99 {
-                                        let _ = db.unlock_achievement(profile.id, "expert_clear");
-                                    }
+                        let mut true_end = true;
+
+                        match self.mode_state.id {
+                            mode::GameModeId::Blitz => {
+                                if self.board.status == GameStatus::Won {
+                                    self.mode_state.score += 500;
                                 } else {
-                                    let _ = db.set_best_time(profile.id, "best_time_hex", duration_ms / 1000);
-                                    let _ = db.unlock_achievement(profile.id, "hex_master");
+                                    self.mode_state.score = (self.mode_state.score - 150).max(0);
+                                }
+                                if self.mode_state.time_limit_sec.unwrap_or(0.0) - self.board.start_time.unwrap().elapsed().as_secs_f64() > 0.0 {
+                                    // Instant restart for Blitz
+                                    self.board = match self.board.geometry {
+                                        board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
+                                        board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
+                                    };
+                                    true_end = false;
                                 }
                             }
-                            self.profiles = db.get_profiles().unwrap_or_default();
-                            if let Some(p) = self.profiles.iter().find(|p| p.id == profile.id) {
-                                self.active_profile = Some(p.clone());
+                            mode::GameModeId::Survival => {
+                                if self.board.status == GameStatus::Won {
+                                    self.mode_state.stage += 1;
+                                    self.board = match self.board.geometry {
+                                        board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count + 2),
+                                        board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count + 2),
+                                    };
+                                    true_end = false;
+                                } else {
+                                    self.mode_state.lives -= 1;
+                                    if self.mode_state.lives > 0 {
+                                        self.board = match self.board.geometry {
+                                            board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
+                                            board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
+                                        };
+                                        true_end = false;
+                                    }
+                                }
+                            }
+                            mode::GameModeId::Expedition => {
+                                if self.board.status == GameStatus::Won {
+                                    if self.mode_state.stage < 30 {
+                                        self.mode_state.stage += 1;
+                                        self.board = match self.board.geometry {
+                                            board::Geometry::Square => Board::new_square(self.board.width, self.board.height, (20 + self.mode_state.stage).min(60) as usize),
+                                            board::Geometry::Hex => Board::new_hex(self.board.radius, (20 + self.mode_state.stage).min(60) as usize),
+                                        };
+                                        self.board.seed = Some(self.mode_state.stage as u64);
+                                        if let (Some(db), Some(profile)) = (&self.db, &self.active_profile) {
+                                            // Ensure we don't regress if they replay a lower stage
+                                            let current = db.get_stat(profile.id, "expedition_stage");
+                                            if self.mode_state.stage as i64 > current {
+                                                let _ = db.set_highest_stat(profile.id, "expedition_stage", self.mode_state.stage as i64);
+                                            }
+                                        }
+                                        true_end = false;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+
+                        if true_end {
+                            if let (Some(db), Some(profile)) = (&self.db, &self.active_profile) {
+                                let duration_ms = if let (Some(s), Some(e)) = (self.board.start_time, self.board.end_time) {
+                                    e.duration_since(s).as_millis() as i64
+                                } else { 0 };
+                                let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64 - (duration_ms / 1000);
+                                
+                                let session = db::GameSession {
+                                    profile_id: profile.id,
+                                    mode: self.mode_state.id.name().to_string(),
+                                    geometry: match self.board.geometry { board::Geometry::Square => "Square".to_string(), board::Geometry::Hex => "Hex".to_string() },
+                                    board_width: self.board.width as i64,
+                                    board_height: self.board.height as i64,
+                                    hex_radius: self.board.radius as i64,
+                                    mine_count: self.board.mine_count as i64,
+                                    started_at,
+                                    duration_ms,
+                                    result: match self.board.status { GameStatus::Won => "Won".to_string(), _ => "Lost".to_string() }
+                                };
+                                let _ = db.save_session(&session);
+                                let _ = db.add_stat(profile.id, "total_playtime_s", duration_ms / 1000);
+                                
+                                if self.board.status == GameStatus::Won {
+                                    let _ = db.add_xp(profile.id, 50);
+                                    if self.board.geometry == board::Geometry::Square {
+                                        let _ = db.set_best_time(profile.id, "best_time_square", duration_ms / 1000);
+                                        let _ = db.unlock_achievement(profile.id, "first_win");
+                                        if self.board.mine_count >= 99 {
+                                            let _ = db.unlock_achievement(profile.id, "expert_clear");
+                                        }
+                                    } else {
+                                        let _ = db.set_best_time(profile.id, "best_time_hex", duration_ms / 1000);
+                                        let _ = db.unlock_achievement(profile.id, "hex_master");
+                                    }
+                                    
+                                    if self.mode_state.id == mode::GameModeId::Blitz && self.mode_state.score >= 2000 {
+                                        let _ = db.unlock_achievement(profile.id, "blitz_star");
+                                    }
+                                    if self.mode_state.id == mode::GameModeId::Survival && self.mode_state.stage >= 5 {
+                                        let _ = db.unlock_achievement(profile.id, "survival_5");
+                                    }
+                                    if self.mode_state.id == mode::GameModeId::Expedition && self.mode_state.stage >= 10 {
+                                        let _ = db.unlock_achievement(profile.id, "expedition_10");
+                                    }
+                                    if self.mode_state.id == mode::GameModeId::Daily {
+                                        let _ = db.unlock_achievement(profile.id, "daily_win");
+                                    }
+                                }
+                                self.profiles = db.get_profiles().unwrap_or_default();
+                                if let Some(p) = self.profiles.iter().find(|p| p.id == profile.id) {
+                                    self.active_profile = Some(p.clone());
+                                }
                             }
                         }
                     }
@@ -665,6 +772,10 @@ impl MineShiftApp {
                         
                         let achievements = vec![
                             ("first_win", "First Victory", "Win your first game."),
+                            ("blitz_star", "Blitz Star", "Score 2000 points in Blitz mode."),
+                            ("survival_5", "Survivor", "Reach Stage 5 in Survival mode."),
+                            ("expedition_10", "Explorer", "Reach Stage 10 in Expedition mode."),
+                            ("daily_win", "Daily Challenger", "Win a Daily Challenge."),
                             ("expert_clear", "Expert Solver", "Clear an Expert board."),
                             ("hex_master", "Hex Master", "Win a Hexagonal game."),
                             ("win_10", "Rising Star", "Win 10 games in total."),
@@ -715,6 +826,87 @@ impl MineShiftApp {
             });
         });
     }
+
+    fn show_game_modes(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            if ui.button(egui::RichText::new("◀ Back").size(20.0)).clicked() {
+                self.screen = AppScreen::MainMenu;
+            }
+            ui.add_space(16.0);
+            ui.label(egui::RichText::new("GAME MODES").size(32.0).strong().color(egui::Color32::from_rgb(0x30, 0x30, 0x38)));
+        });
+        ui.add_space(16.0);
+        
+        egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
+            ui.vertical_centered(|ui| {
+                let modes = vec![
+                    (mode::GameModeId::Classic, "⬜", "SQUARE"),
+                    (mode::GameModeId::Classic, "⬡", "HEXAGON"),
+                    (mode::GameModeId::Sprint, "⚡", "SQUARE"),
+                    (mode::GameModeId::NoGuess, "🧠", "SQUARE"),
+                    (mode::GameModeId::Blitz, "🔥", "SQUARE"),
+                    (mode::GameModeId::Survival, "❤️", "SQUARE"),
+                    (mode::GameModeId::Daily, "📅", "SQUARE"),
+                    (mode::GameModeId::Expedition, "🗺️", "SQUARE"),
+                    (mode::GameModeId::Zen, "🧘", "SQUARE"),
+                    (mode::GameModeId::Sandbox, "⚙️", "SQUARE"),
+                ];
+                
+                for (id, icon, variant) in modes {
+                    egui::Frame::new().fill(egui::Color32::from_rgb(0xFF, 0xFF, 0xFF)).inner_margin(16.0).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(icon).size(32.0));
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(format!("{} - {}", id.name(), variant)).size(24.0).strong().color(egui::Color32::from_rgb(0x30, 0x30, 0x38)));
+                                ui.label(egui::RichText::new(id.desc()).size(16.0).color(egui::Color32::from_rgb(0xA1, 0xA0, 0xA8)));
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.add(egui::Button::new(egui::RichText::new("PLAY").size(20.0)).fill(egui::Color32::from_rgb(0x79, 0x65, 0xBE))).clicked() {
+                                    self.mode_state = mode::ModeState::new(id.clone());
+                                    if variant == "SQUARE" {
+                                        self.board = Board::new_square(16, 16, 40); // Intermediate
+                                    } else {
+                                        self.board = Board::new_hex(8, 40);
+                                    }
+                                    
+                                    if self.mode_state.id == mode::GameModeId::NoGuess {
+                                        self.board.is_no_guess = true;
+                                    } else if self.mode_state.id == mode::GameModeId::Blitz {
+                                        self.mode_state.time_limit_sec = Some(180.0);
+                                        self.mode_state.score = 0;
+                                    } else if self.mode_state.id == mode::GameModeId::Survival {
+                                        self.mode_state.lives = 3;
+                                        self.mode_state.stage = 1;
+                                    } else if self.mode_state.id == mode::GameModeId::Expedition {
+                                        self.mode_state.lives = 1;
+                                        if let (Some(db), Some(profile)) = (&self.db, &self.active_profile) {
+                                            self.mode_state.stage = db.get_stat(profile.id, "expedition_stage").max(1) as i32;
+                                        } else {
+                                            self.mode_state.stage = 1;
+                                        }
+                                        self.board.seed = Some(self.mode_state.stage as u64);
+                                        self.board.mine_count = (20 + self.mode_state.stage).min(60) as usize;
+                                    } else if self.mode_state.id == mode::GameModeId::Daily {
+                                        use std::hash::{Hash, Hasher};
+                                        use std::collections::hash_map::DefaultHasher;
+                                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                                        let days_since_epoch = now / 86400;
+                                        let mut hasher = DefaultHasher::new();
+                                        days_since_epoch.hash(&mut hasher);
+                                        self.board.seed = Some(hasher.finish());
+                                    }
+
+                                    self.screen = AppScreen::Gameplay;
+                                }
+                            });
+                        });
+                    });
+                    ui.add_space(16.0);
+                }
+            });
+        });
+    }
 }
 
 impl eframe::App for MineShiftApp {
@@ -739,6 +931,7 @@ impl eframe::App for MineShiftApp {
                 AppScreen::Profiles => self.show_profiles(ui),
                 AppScreen::Statistics => self.show_statistics(ui),
                 AppScreen::Achievements => self.show_achievements(ui),
+                AppScreen::GameModes => self.show_game_modes(ui),
             }
         });
     }

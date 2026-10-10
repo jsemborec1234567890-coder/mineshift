@@ -244,6 +244,23 @@ impl Database {
         Ok(())
     }
 
+    pub fn set_highest_stat(&self, profile_id: i64, record_key: &str, val: i64) -> Result<()> {
+        let current = self.get_stat(profile_id, record_key);
+        if val > current {
+            let updated = self.conn.execute(
+                "UPDATE game_statistics SET statistic_value = ?3 WHERE profile_id = ?1 AND statistic_key = ?2",
+                params![profile_id, record_key, val]
+            )?;
+            if updated == 0 {
+                self.conn.execute(
+                    "INSERT INTO game_statistics (profile_id, statistic_key, statistic_value) VALUES (?1, ?2, ?3)",
+                    params![profile_id, record_key, val]
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn set_best_time(&self, profile_id: i64, record_key: &str, time_ms: i64) -> Result<()> {
         let current = self.get_stat(profile_id, record_key);
         if current == 0 || time_ms < current {

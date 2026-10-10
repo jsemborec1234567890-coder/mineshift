@@ -40,6 +40,7 @@ pub enum GameStatus {
     Lost,
 }
 
+#[derive(Clone)]
 pub struct Board {
     pub geometry: Geometry,
     pub radius: usize,
@@ -49,6 +50,8 @@ pub struct Board {
     pub mine_count: usize,
     pub status: GameStatus,
     pub first_click: bool,
+    pub is_no_guess: bool,
+    pub seed: Option<u64>,
     pub flags_placed: usize,
     pub start_time: Option<std::time::Instant>,
     pub end_time: Option<std::time::Instant>,
@@ -65,6 +68,8 @@ impl Board {
             mine_count,
             status: GameStatus::Playing,
             first_click: true,
+            is_no_guess: false,
+            seed: None,
             flags_placed: 0,
             start_time: None,
             end_time: None,
@@ -95,6 +100,8 @@ impl Board {
             mine_count,
             status: GameStatus::Playing,
             first_click: true,
+            is_no_guess: false,
+            seed: None,
             flags_placed: 0,
             start_time: None,
             end_time: None,
@@ -115,7 +122,7 @@ impl Board {
         None
     }
 
-    fn neighbors(&self, x: usize, y: usize) -> Vec<(usize, usize)> {
+    pub fn neighbors(&self, x: usize, y: usize) -> Vec<(usize, usize)> {
         let x = x as isize;
         let y = y as isize;
         let w = self.width as isize;
@@ -147,7 +154,7 @@ impl Board {
     }
 
     fn place_mines(&mut self, safe_x: usize, safe_y: usize) {
-        let mut rng = rand::thread_rng();
+        use rand::{Rng, SeedableRng};
         let mut mines_placed = 0;
         
         let safe_zone: Vec<(usize, usize)> = self.neighbors(safe_x, safe_y)
@@ -155,18 +162,37 @@ impl Board {
             .chain(std::iter::once((safe_x, safe_y)))
             .collect();
 
-        while mines_placed < self.mine_count {
-            let x = rng.gen_range(0..self.width);
-            let y = rng.gen_range(0..self.height);
-            
-            let idx = self.get_index(x, y);
-            if !self.cells[idx].active || safe_zone.contains(&(x, y)) {
-                continue;
+        if let Some(s) = self.seed {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(s);
+            while mines_placed < self.mine_count {
+                let x = rng.gen_range(0..self.width);
+                let y = rng.gen_range(0..self.height);
+                
+                let idx = self.get_index(x, y);
+                if !self.cells[idx].active || safe_zone.contains(&(x, y)) {
+                    continue;
+                }
+                
+                if !self.cells[idx].is_mine {
+                    self.cells[idx].is_mine = true;
+                    mines_placed += 1;
+                }
             }
-            
-            if !self.cells[idx].is_mine {
-                self.cells[idx].is_mine = true;
-                mines_placed += 1;
+        } else {
+            let mut rng = rand::thread_rng();
+            while mines_placed < self.mine_count {
+                let x = rng.gen_range(0..self.width);
+                let y = rng.gen_range(0..self.height);
+                
+                let idx = self.get_index(x, y);
+                if !self.cells[idx].active || safe_zone.contains(&(x, y)) {
+                    continue;
+                }
+                
+                if !self.cells[idx].is_mine {
+                    self.cells[idx].is_mine = true;
+                    mines_placed += 1;
+                }
             }
         }
         
@@ -197,7 +223,17 @@ impl Board {
 
         if self.first_click {
             self.start_time = Some(std::time::Instant::now());
-            self.place_mines(x, y);
+            if self.is_no_guess {
+                if let Some(mut new_b) = crate::no_guess::generate_no_guess_board(self.clone(), x, y) {
+                    new_b.start_time = self.start_time;
+                    new_b.is_no_guess = true;
+                    *self = new_b;
+                } else {
+                    self.place_mines(x, y); // fallback if no-guess failed to generate
+                }
+            } else {
+                self.place_mines(x, y);
+            }
             self.first_click = false;
         }
 

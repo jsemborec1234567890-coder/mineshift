@@ -38,6 +38,7 @@ enum AppScreen {
     Statistics,
     Achievements,
     GameModes,
+    GeneratingNoGuess,
 }
 
 struct MineShiftApp {
@@ -50,6 +51,7 @@ struct MineShiftApp {
     new_profile_name: String,
     rename_profile_id: Option<i64>,
     rename_buffer: String,
+    generation_rx: Option<std::sync::mpsc::Receiver<(Option<Board>, usize, usize)>>,
 }
 
 impl MineShiftApp {
@@ -79,6 +81,7 @@ impl MineShiftApp {
             new_profile_name: String::new(),
             rename_profile_id: None,
             rename_buffer: String::new(),
+            generation_rx: None,
         }
     }
     
@@ -419,7 +422,22 @@ impl MineShiftApp {
                     }
                     
                     let old_status = self.board.status;
-                    if let Some((x, y)) = clicked_cell { self.board.reveal(x, y); }
+                    if let Some((x, y)) = clicked_cell { 
+                        if self.board.first_click && self.board.is_no_guess {
+                            // Start generation thread
+                            let board_clone = self.board.clone();
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            self.generation_rx = Some(rx);
+                            self.screen = AppScreen::GeneratingNoGuess;
+                            
+                            std::thread::spawn(move || {
+                                let result = crate::no_guess::generate_no_guess_board(board_clone, x, y);
+                                let _ = tx.send((result, x, y));
+                            });
+                        } else {
+                            self.board.reveal(x, y); 
+                        }
+                    }
                     if let Some((x, y)) = secondary_clicked_cell { self.board.toggle_flag(x, y); }
                     if let Some((x, y)) = middle_clicked_cell { self.board.chord(x, y); }
                     
@@ -907,6 +925,41 @@ impl MineShiftApp {
             });
         });
     }
+    fn show_generating(&mut self, ui: &mut egui::Ui) {
+        // Must request repaint continuously while generating to keep the UI ticking
+        ui.ctx().request_repaint();
+
+        if let Some(rx) = &self.generation_rx {
+            if let Ok((result, cx, cy)) = rx.try_recv() {
+                if let Some(mut new_b) = result {
+                    new_b.start_time = Some(std::time::Instant::now());
+                    new_b.is_no_guess = true;
+                    // First click was consumed by generator
+                    new_b.first_click = false;
+                    self.board = new_b;
+                } else {
+                    // Fallback to normal mine placement.
+                    self.board.is_no_guess = false;
+                    self.board.reveal(cx, cy);
+                }
+                self.screen = AppScreen::Gameplay;
+                self.generation_rx = None;
+                return;
+            }
+        }
+
+        ui.vertical_centered(|ui| {
+            ui.add_space(200.0);
+            ui.label(egui::RichText::new("Preparing a logically solvable puzzle...").size(24.0).strong().color(egui::Color32::from_rgb(0x30, 0x30, 0x38)));
+            ui.add_space(32.0);
+            ui.spinner();
+            ui.add_space(64.0);
+            if ui.button(egui::RichText::new("Cancel").size(20.0)).clicked() {
+                self.generation_rx = None;
+                self.screen = AppScreen::MainMenu;
+            }
+        });
+    }
 }
 
 impl eframe::App for MineShiftApp {
@@ -932,6 +985,7 @@ impl eframe::App for MineShiftApp {
                 AppScreen::Statistics => self.show_statistics(ui),
                 AppScreen::Achievements => self.show_achievements(ui),
                 AppScreen::GameModes => self.show_game_modes(ui),
+                AppScreen::GeneratingNoGuess => self.show_generating(ui),
             }
         });
     }

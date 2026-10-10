@@ -223,17 +223,7 @@ impl Board {
 
         if self.first_click {
             self.start_time = Some(std::time::Instant::now());
-            if self.is_no_guess {
-                if let Some(mut new_b) = crate::no_guess::generate_no_guess_board(self.clone(), x, y) {
-                    new_b.start_time = self.start_time;
-                    new_b.is_no_guess = true;
-                    *self = new_b;
-                } else {
-                    self.place_mines(x, y); // fallback if no-guess failed to generate
-                }
-            } else {
-                self.place_mines(x, y);
-            }
+            self.place_mines(x, y);
             self.first_click = false;
         }
 

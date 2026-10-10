@@ -142,39 +142,45 @@ impl MineShiftApp {
             ui.add_space(60.0);
             
             let play_btn = egui::Button::new(
-                egui::RichText::new("PLAY - GAME MODES").size(24.0).color(egui::Color32::from_rgb(0xFF, 0xD6, 0xA8))
-            ).fill(egui::Color32::from_rgb(0x79, 0x65, 0xBE)).min_size(egui::vec2(300.0, 54.0));
+                egui::RichText::new("PLAY").size(20.0).color(egui::Color32::from_rgb(0xFF, 0xFF, 0xFF))
+            ).fill(egui::Color32::from_rgb(121, 101, 190)).min_size(egui::vec2(400.0, 54.0));
             
             if ui.add(play_btn).clicked() {
                 self.screen = AppScreen::GameModes;
             }
             
-            ui.add_space(32.0);
+            ui.add_space(12.0);
             
-            let secondary_fill = egui::Color32::from_rgb(0xA1, 0xA0, 0xA8);
-            let text_color = egui::Color32::from_rgb(0x30, 0x30, 0x38);
+            let customize_btn = egui::Button::new(
+                egui::RichText::new("CUSTOMIZE").size(20.0).color(egui::Color32::from_rgb(0x30, 0x30, 0x38))
+            ).fill(egui::Color32::from_rgb(208, 188, 255)).min_size(egui::vec2(400.0, 54.0));
             
-            ui.add_space(32.0);
-            if ui.add(egui::Button::new(egui::RichText::new("Profiles").size(20.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(300.0, 44.0))).clicked() {
+            if ui.add(customize_btn).clicked() {
+                self.screen = AppScreen::ThemeStudio;
+            }
+            
+            ui.add_space(12.0);
+            
+            let secondary_fill = egui::Color32::from_rgb(0xFF, 0xFF, 0xFF);
+            let text_color = egui::Color32::from_rgb(0x4A, 0x4A, 0x4A);
+            
+            if ui.add(egui::Button::new(egui::RichText::new("PROFILES").size(18.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(400.0, 48.0))).clicked() {
                 if let Some(ref d) = self.db {
                     self.profiles = d.get_profiles().unwrap_or_default();
                 }
                 self.screen = AppScreen::Profiles;
             }
             ui.add_space(12.0);
-            if ui.add(egui::Button::new(egui::RichText::new("Statistics").size(20.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(300.0, 44.0))).clicked() {
+            if ui.add(egui::Button::new(egui::RichText::new("STATISTICS").size(18.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(400.0, 48.0))).clicked() {
                 self.screen = AppScreen::Statistics;
             }
             ui.add_space(12.0);
-            if ui.add(egui::Button::new(egui::RichText::new("Achievements").size(20.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(300.0, 44.0))).clicked() {
+            if ui.add(egui::Button::new(egui::RichText::new("ACHIEVEMENTS").size(18.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(400.0, 48.0))).clicked() {
                 self.screen = AppScreen::Achievements;
             }
             ui.add_space(12.0);
-            if ui.add(egui::Button::new(egui::RichText::new("Theme Studio").size(20.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(300.0, 44.0))).clicked() {
-                self.screen = AppScreen::ThemeStudio;
-            }
-            ui.add_space(12.0);
-            if ui.add(egui::Button::new(egui::RichText::new("Exit").size(20.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(300.0, 44.0))).clicked() {
+            if ui.add(egui::Button::new(egui::RichText::new("SETTINGS").size(18.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(400.0, 48.0))).clicked() {
+                // Future settings screen, or just Exit for now
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
@@ -998,7 +1004,12 @@ impl MineShiftApp {
                     }
                 }
             }
-            ui.label(egui::RichText::new("ULTIMATE THEME STUDIO").size(24.0).strong().color(self.theme.colors.text_primary()));
+            ui.label(egui::RichText::new("CUSTOMIZATION HUB").size(24.0).strong().color(self.theme.colors.text_primary()));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(egui::RichText::new("✨ Profile Cosmetics").size(16.0)).clicked() {
+                    self.screen = AppScreen::ProfileCosmetics;
+                }
+            });
         });
         ui.separator();
         
@@ -1153,7 +1164,7 @@ impl MineShiftApp {
     fn show_profile_cosmetics(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui.button("Back").clicked() {
-                self.screen = AppScreen::Profiles;
+                self.screen = AppScreen::ThemeStudio;
             }
             ui.label(egui::RichText::new("PROFILE COSMETICS").size(24.0).strong().color(self.theme.colors.text_primary()));
         });

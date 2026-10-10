@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Result, params, OptionalExtension};
+use rusqlite::{Connection, Result, params};
 use std::path::PathBuf;
 use directories::ProjectDirs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -10,6 +10,9 @@ pub struct Profile {
     pub created_at: i64,
     pub last_played_at: i64,
     pub avatar_id: String,
+    pub selected_theme_id: String,
+    pub title: String,
+    pub badge_id: String,
     pub current_level: i64,
     pub total_xp: i64,
 }
@@ -53,7 +56,7 @@ impl Database {
         }
     }
     
-    fn apply_migrations(conn: &mut Connection) -> Result<()> {
+        fn apply_migrations(conn: &mut Connection) -> Result<()> {
         let tx = conn.transaction()?;
         tx.execute(
             "CREATE TABLE IF NOT EXISTS profiles (
@@ -62,13 +65,30 @@ impl Database {
                 created_at INTEGER NOT NULL,
                 last_played_at INTEGER NOT NULL,
                 avatar_id TEXT NOT NULL,
-                selected_theme_id TEXT NOT NULL,
+                selected_theme_id TEXT NOT NULL DEFAULT 'soft_circuit',
+                title TEXT NOT NULL DEFAULT 'Novice',
+                badge_id TEXT NOT NULL DEFAULT 'badge_01',
                 current_level INTEGER NOT NULL DEFAULT 1,
                 total_xp INTEGER NOT NULL DEFAULT 0
             )",
             [],
         )?;
         
+        let _ = tx.execute("ALTER TABLE profiles ADD COLUMN selected_theme_id TEXT NOT NULL DEFAULT 'soft_circuit'", []);
+        let _ = tx.execute("ALTER TABLE profiles ADD COLUMN title TEXT NOT NULL DEFAULT 'Novice'", []);
+        let _ = tx.execute("ALTER TABLE profiles ADD COLUMN badge_id TEXT NOT NULL DEFAULT 'badge_01'", []);
+
+        tx.execute(
+            "CREATE TABLE IF NOT EXISTS custom_themes (
+                id TEXT PRIMARY KEY,
+                profile_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                data TEXT NOT NULL,
+                FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
         tx.execute(
             "CREATE TABLE IF NOT EXISTS game_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,7 +102,7 @@ impl Database {
                 started_at INTEGER NOT NULL,
                 duration_ms INTEGER NOT NULL,
                 result TEXT NOT NULL,
-                FOREIGN KEY(profile_id) REFERENCES profiles(id)
+                FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
             )",
             [],
         )?;
@@ -93,7 +113,7 @@ impl Database {
                 achievement_id TEXT NOT NULL,
                 unlocked_at INTEGER NOT NULL,
                 PRIMARY KEY (profile_id, achievement_id),
-                FOREIGN KEY(profile_id) REFERENCES profiles(id)
+                FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
             )",
             [],
         )?;
@@ -104,7 +124,7 @@ impl Database {
                 statistic_key TEXT NOT NULL,
                 statistic_value INTEGER NOT NULL,
                 PRIMARY KEY (profile_id, statistic_key),
-                FOREIGN KEY(profile_id) REFERENCES profiles(id)
+                FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
             )",
             [],
         )?;
@@ -113,7 +133,7 @@ impl Database {
     }
 
     pub fn get_profiles(&self) -> Result<Vec<Profile>> {
-        let mut stmt = self.conn.prepare("SELECT id, display_name, created_at, last_played_at, avatar_id, current_level, total_xp FROM profiles")?;
+        let mut stmt = self.conn.prepare("SELECT id, display_name, created_at, last_played_at, avatar_id, selected_theme_id, title, badge_id, current_level, total_xp FROM profiles")?;
         let profile_iter = stmt.query_map([], |row| {
             Ok(Profile {
                 id: row.get(0)?,
@@ -121,8 +141,11 @@ impl Database {
                 created_at: row.get(2)?,
                 last_played_at: row.get(3)?,
                 avatar_id: row.get(4)?,
-                current_level: row.get(5)?,
-                total_xp: row.get(6)?,
+                selected_theme_id: row.get(5).unwrap_or_else(|_| "soft_circuit".to_string()),
+                title: row.get(6).unwrap_or_else(|_| "Novice".to_string()),
+                badge_id: row.get(7).unwrap_or_else(|_| "badge_01".to_string()),
+                current_level: row.get(8)?,
+                total_xp: row.get(9)?,
             })
         })?;
         let mut profiles = Vec::new();
@@ -286,6 +309,43 @@ impl Database {
         Ok(())
     }
     
+        pub fn set_profile_theme(&self, profile_id: i64, theme_id: &str) -> Result<()> {
+        self.conn.execute("UPDATE profiles SET selected_theme_id = ?2 WHERE id = ?1", params![profile_id, theme_id])?;
+        Ok(())
+    }
+
+    pub fn set_profile_cosmetics(&self, profile_id: i64, title: &str, badge_id: &str) -> Result<()> {
+        self.conn.execute("UPDATE profiles SET title = ?2, badge_id = ?3 WHERE id = ?1", params![profile_id, title, badge_id])?;
+        Ok(())
+    }
+
+    pub fn save_custom_theme(&self, profile_id: i64, theme_id: &str, name: &str, json_data: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO custom_themes (id, profile_id, name, data) VALUES (?1, ?2, ?3, ?4)",
+            params![theme_id, profile_id, name, json_data]
+        )?;
+        Ok(())
+    }
+
+    pub fn get_custom_themes(&self, profile_id: i64) -> Result<Vec<(String, String, String)>> {
+        let mut stmt = self.conn.prepare("SELECT id, name, data FROM custom_themes WHERE profile_id = ?1")?;
+        let iter = stmt.query_map(params![profile_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+        let mut res = Vec::new();
+        for t in iter { res.push(t?); }
+        Ok(res)
+    }
+
+    pub fn delete_custom_theme(&self, theme_id: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM custom_themes WHERE id = ?1", params![theme_id])?;
+        Ok(())
+    }
+        pub fn set_profile_avatar(&self, profile_id: i64, avatar_id: &str) -> Result<()> {
+        self.conn.execute("UPDATE profiles SET avatar_id = ?2 WHERE id = ?1", params![profile_id, avatar_id])?;
+        Ok(())
+    }
+
     pub fn rename_profile(&self, profile_id: i64, new_name: &str) -> Result<()> {
         self.conn.execute("UPDATE profiles SET display_name = ?2 WHERE id = ?1", params![profile_id, new_name])?;
         Ok(())

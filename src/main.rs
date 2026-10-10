@@ -1,4 +1,5 @@
 mod db;
+pub mod theme;
 
 use minecore::board::{Board, GameStatus, CellState};
 use minecore::mode;
@@ -36,6 +37,8 @@ enum AppScreen {
     Achievements,
     GameModes,
     GeneratingNoGuess,
+    ThemeStudio,
+    ProfileCosmetics,
 }
 
 struct MineShiftApp {
@@ -49,16 +52,33 @@ struct MineShiftApp {
     rename_profile_id: Option<i64>,
     rename_buffer: String,
     generation_rx: Option<std::sync::mpsc::Receiver<(Option<Board>, usize, usize)>>,
+    theme: crate::theme::Theme,
 }
 
 impl MineShiftApp {
+    fn apply_profile_theme(&mut self) {
+        if let Some(ref prof) = self.active_profile {
+            if let Some(theme) = crate::theme::Theme::get_preset(&prof.selected_theme_id) {
+                self.theme = theme;
+            } else if let Some(ref db) = self.db {
+                if let Ok(customs) = db.get_custom_themes(prof.id) {
+                    if let Some((_, _, data)) = customs.into_iter().find(|(id, _, _)| id == &prof.selected_theme_id) {
+                        if let Ok(mut t) = serde_json::from_str::<crate::theme::Theme>(&data) {
+                            t.is_custom = true;
+                            self.theme = t;
+                        }
+                    }
+                }
+            }
+        }
+    }
     fn new() -> Self {
         let db = db::Database::new().ok();
         let mut profiles = Vec::new();
         let mut active_profile = None;
         
         if let Some(ref d) = db {
-            if let Ok(mut profs) = d.get_profiles() {
+            if let Ok(profs) = d.get_profiles() {
                 if !profs.is_empty() {
                     active_profile = Some(profs[0].clone());
                 }
@@ -68,7 +88,7 @@ impl MineShiftApp {
         
         let screen = if active_profile.is_some() { AppScreen::MainMenu } else { AppScreen::Profiles };
 
-        Self {
+        let mut app = Self {
             screen,
             board: Board::new_square(9, 9, 10),
             mode_state: mode::ModeState::new(mode::GameModeId::Classic),
@@ -79,7 +99,10 @@ impl MineShiftApp {
             rename_profile_id: None,
             rename_buffer: String::new(),
             generation_rx: None,
-        }
+            theme: crate::theme::Theme::soft_circuit(),
+        };
+        app.apply_profile_theme();
+        app
     }
     
     fn show_main_menu(&mut self, ui: &mut egui::Ui) {
@@ -145,6 +168,10 @@ impl MineShiftApp {
             ui.add_space(12.0);
             if ui.add(egui::Button::new(egui::RichText::new("Achievements").size(20.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(300.0, 44.0))).clicked() {
                 self.screen = AppScreen::Achievements;
+            }
+            ui.add_space(12.0);
+            if ui.add(egui::Button::new(egui::RichText::new("Theme Studio").size(20.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(300.0, 44.0))).clicked() {
+                self.screen = AppScreen::ThemeStudio;
             }
             ui.add_space(12.0);
             if ui.add(egui::Button::new(egui::RichText::new("Exit").size(20.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(300.0, 44.0))).clicked() {
@@ -568,6 +595,10 @@ impl MineShiftApp {
                     self.screen = AppScreen::MainMenu;
                 }
                 ui.add_space(16.0);
+                if ui.button(egui::RichText::new("✨ Customize Cosmetics").size(20.0)).clicked() {
+                    self.screen = AppScreen::ProfileCosmetics;
+                }
+                ui.add_space(16.0);
             }
             ui.label(egui::RichText::new("PLAYER PROFILES").size(32.0).strong().color(egui::Color32::from_rgb(0x30, 0x30, 0x38)));
         });
@@ -957,6 +988,247 @@ impl MineShiftApp {
             }
         });
     }
+    fn show_theme_studio(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            if ui.button("Back").clicked() {
+                self.screen = AppScreen::MainMenu;
+                if let Some(ref prof) = self.active_profile {
+                    if let Some(ref db) = self.db {
+                        let _ = db.set_profile_theme(prof.id, &self.theme.id);
+                    }
+                }
+            }
+            ui.label(egui::RichText::new("ULTIMATE THEME STUDIO").size(24.0).strong().color(self.theme.colors.text_primary()));
+        });
+        ui.separator();
+        
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(200.0);
+                ui.heading("Presets");
+                let presets = vec![
+                    crate::theme::Theme::soft_circuit(),
+                    crate::theme::Theme::obsidian(),
+                    crate::theme::Theme::aurora(),
+                    crate::theme::Theme::paper(),
+                    crate::theme::Theme::retro(),
+                    crate::theme::Theme::neon_arcade(),
+                ];
+                for preset in presets {
+                    if ui.selectable_label(self.theme.id == preset.id, &preset.name).clicked() {
+                        self.theme = preset;
+                    }
+                }
+                ui.separator();
+                ui.heading("Custom Themes");
+                if let Some(ref prof) = self.active_profile {
+                    if let Some(ref db) = self.db {
+                        if let Ok(customs) = db.get_custom_themes(prof.id) {
+                            for (id, name, data) in customs {
+                                if ui.selectable_label(self.theme.id == id, &name).clicked() {
+                                    if let Ok(mut imported) = serde_json::from_str::<crate::theme::Theme>(&data) {
+                                        imported.is_custom = true;
+                                        self.theme = imported;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if ui.button("Create New").clicked() {
+                    let mut new_theme = self.theme.clone();
+                    new_theme.is_custom = true;
+                    new_theme.id = format!("custom_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
+                    new_theme.name = format!("Custom Theme");
+                    self.theme = new_theme;
+                }
+                if ui.button("Export").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().save_file() {
+                        let data = serde_json::to_string_pretty(&self.theme).unwrap();
+                        let _ = std::fs::write(path, data);
+                    }
+                }
+                if ui.button("Import").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().pick_file() {
+                        if let Ok(data) = std::fs::read_to_string(path) {
+                            if let Ok(mut imported) = serde_json::from_str::<crate::theme::Theme>(&data) {
+                                imported.is_custom = true;
+                                imported.id = format!("custom_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
+                                self.theme = imported;
+                            }
+                        }
+                    }
+                }
+                if self.theme.is_custom {
+                    if ui.button("Save to Profile").clicked() {
+                        if let Some(ref prof) = self.active_profile {
+                            if let Some(ref db) = self.db {
+                                let data = serde_json::to_string(&self.theme).unwrap();
+                                let _ = db.save_custom_theme(prof.id, &self.theme.id, &self.theme.name, &data);
+                            }
+                        }
+                    }
+                }
+            });
+            
+            ui.separator();
+            
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.set_width(300.0);
+                if self.theme.is_custom {
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        ui.text_edit_singleline(&mut self.theme.name);
+                    });
+                }
+                
+                ui.collapsing("Colors", |ui| {
+                    ui.label("Background"); color_picker(ui, &mut self.theme.colors.bg);
+                    ui.label("Menu Background"); color_picker(ui, &mut self.theme.colors.menu_bg);
+                    ui.label("Card Background"); color_picker(ui, &mut self.theme.colors.card_bg);
+                    ui.label("Border"); color_picker(ui, &mut self.theme.colors.border);
+                    ui.label("Covered Cell"); color_picker(ui, &mut self.theme.colors.covered);
+                    ui.label("Revealed Cell"); color_picker(ui, &mut self.theme.colors.revealed);
+                    ui.label("Text Primary"); color_picker(ui, &mut self.theme.colors.text_primary);
+                    ui.label("Text Muted"); color_picker(ui, &mut self.theme.colors.text_muted);
+                    ui.label("Accent"); color_picker(ui, &mut self.theme.colors.accent);
+                    ui.label("Danger"); color_picker(ui, &mut self.theme.colors.danger);
+                    ui.label("Success"); color_picker(ui, &mut self.theme.colors.success);
+                    ui.label("Button Background"); color_picker(ui, &mut self.theme.colors.button_bg);
+                });
+                
+                ui.collapsing("Geometry", |ui| {
+                    ui.add(egui::Slider::new(&mut self.theme.geometry.cell_spacing, 0.0..=10.0).text("Cell Spacing"));
+                    ui.add(egui::Slider::new(&mut self.theme.geometry.square_radius, 0.0..=20.0).text("Square Radius"));
+                    ui.add(egui::Slider::new(&mut self.theme.geometry.shadow_depth, 0.0..=10.0).text("Shadow Depth"));
+                    ui.add(egui::Slider::new(&mut self.theme.geometry.animation_speed, 0.0..=5.0).text("Animation Speed"));
+                    ui.add(egui::Slider::new(&mut self.theme.geometry.border_thickness, 0.0..=5.0).text("Border Thickness"));
+                });
+                
+                ui.collapsing("Numbers", |ui| {
+                    for i in 0..8 {
+                        if i < self.theme.colors.number_colors.len() {
+                            ui.label(format!("Number {}", i + 1));
+                            color_picker(ui, &mut self.theme.colors.number_colors[i]);
+                        }
+                    }
+                });
+            });
+            
+            ui.separator();
+            
+            ui.vertical(|ui| {
+                ui.heading("Live Preview");
+                ui.label("Changes apply instantly.");
+                
+                let (rect, _response) = ui.allocate_exact_size(egui::vec2(200.0, 300.0), egui::Sense::hover());
+                let center = rect.min + egui::vec2(100.0, 100.0);
+                
+                let cell_size = 30.0;
+                let fill_color = self.theme.colors.covered();
+                let shadow_depth = self.theme.geometry.shadow_depth;
+                
+                let square_rect = egui::Rect::from_center_size(center, egui::vec2(cell_size, cell_size));
+                let shadow_rect = square_rect.translate(egui::vec2(0.0, 2.0));
+                ui.painter().rect_filled(shadow_rect, self.theme.geometry.square_radius, egui::Color32::from_black_alpha((shadow_depth * 10.0) as u8));
+                ui.painter().rect_filled(square_rect, self.theme.geometry.square_radius, fill_color);
+                if self.theme.geometry.border_thickness > 0.0 {
+                    ui.painter().rect_stroke(square_rect, self.theme.geometry.square_radius, egui::Stroke::new(self.theme.geometry.border_thickness, self.theme.colors.border()), egui::StrokeKind::Inside);
+                }
+                
+                let hex_center = center + egui::vec2(0.0, 100.0);
+                let mut points = vec![];
+                let mut shadow_points = vec![];
+                for i in 0..6 {
+                    let angle = (i as f32 * 60.0 - 30.0).to_radians();
+                    let p = hex_center + egui::vec2(angle.cos() * cell_size * 0.95, angle.sin() * cell_size * 0.95);
+                    points.push(p);
+                    shadow_points.push(p + egui::vec2(0.0, 2.0));
+                }
+                ui.painter().add(egui::Shape::convex_polygon(shadow_points, egui::Color32::from_black_alpha((shadow_depth * 10.0) as u8), egui::Stroke::NONE));
+                ui.painter().add(egui::Shape::convex_polygon(points, fill_color, if self.theme.geometry.border_thickness > 0.0 { egui::Stroke::new(self.theme.geometry.border_thickness, self.theme.colors.border()) } else { egui::Stroke::NONE }));
+            });
+        });
+    }
+    fn show_profile_cosmetics(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            if ui.button("Back").clicked() {
+                self.screen = AppScreen::Profiles;
+            }
+            ui.label(egui::RichText::new("PROFILE COSMETICS").size(24.0).strong().color(self.theme.colors.text_primary()));
+        });
+        ui.separator();
+        
+        let mut updated = false;
+        if let Some(ref mut prof) = self.active_profile {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(200.0);
+                    ui.heading("Avatars");
+                    let avatars = vec!["🧑", "👽", "🤖", "🎭", "💾", "⚡", "🔮", "🎮"];
+                    for avatar in avatars {
+                        if ui.selectable_label(prof.avatar_id == avatar, avatar).clicked() {
+                            prof.avatar_id = avatar.to_string();
+                            updated = true;
+                        }
+                    }
+                    
+                    ui.separator();
+                    ui.heading("Badges");
+                    let badges = vec!["None", "🌟 Pioneer", "🔥 Streak", "🏆 Champion", "⚔️ Veteran"];
+                    for badge in badges {
+                        if ui.selectable_label(prof.badge_id == badge, badge).clicked() {
+                            prof.badge_id = badge.to_string();
+                            updated = true;
+                        }
+                    }
+                });
+                
+                ui.separator();
+                
+                ui.vertical(|ui| {
+                    ui.heading("Titles");
+                    let titles = vec!["Novice Sweeper", "Logic Master", "Hexadecimal", "Mine Specialist", "The Untouchable", "Circuit Breaker"];
+                    for title in titles {
+                        if ui.selectable_label(prof.title == title, title).clicked() {
+                            prof.title = title.to_string();
+                            updated = true;
+                        }
+                    }
+                    
+                    ui.separator();
+                    ui.heading("Preview");
+                    egui::Frame::new().fill(self.theme.colors.card_bg()).inner_margin(16.0).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(&prof.avatar_id).size(48.0));
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(&prof.display_name).size(24.0).strong().color(self.theme.colors.text_primary()));
+                                ui.label(egui::RichText::new(&prof.title).size(16.0).color(self.theme.colors.accent()));
+                                if prof.badge_id != "None" && !prof.badge_id.is_empty() {
+                                    ui.label(egui::RichText::new(&prof.badge_id).size(16.0).color(self.theme.colors.success()));
+                                }
+                            });
+                        });
+                    });
+                });
+            });
+            
+            if updated {
+                if let Some(ref db) = self.db {
+                    let _ = db.set_profile_cosmetics(prof.id, &prof.title, &prof.badge_id);
+                    let _ = db.set_profile_avatar(prof.id, &prof.avatar_id);
+                }
+            }
+        } else {
+            ui.label("No active profile.");
+        }
+    }
+}
+
+fn color_picker(ui: &mut eframe::egui::Ui, color: &mut (u8, u8, u8)) {
+    let mut c = [color.0, color.1, color.2];
+    ui.color_edit_button_srgb(&mut c);
+    *color = (c[0], c[1], c[2]);
 }
 
 impl eframe::App for MineShiftApp {
@@ -983,6 +1255,8 @@ impl eframe::App for MineShiftApp {
                 AppScreen::Achievements => self.show_achievements(ui),
                 AppScreen::GameModes => self.show_game_modes(ui),
                 AppScreen::GeneratingNoGuess => self.show_generating(ui),
+                AppScreen::ThemeStudio => self.show_theme_studio(ui),
+                AppScreen::ProfileCosmetics => self.show_profile_cosmetics(ui),
             }
         });
     }

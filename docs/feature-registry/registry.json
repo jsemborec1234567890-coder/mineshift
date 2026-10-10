@@ -1,0 +1,32 @@
+[
+  {
+    "id": "F-001",
+    "name": "MINECORE Extrication",
+    "status": "IMPLEMENTED",
+    "update": "07"
+  },
+  {
+    "id": "F-002",
+    "name": "Background No Guess Generator",
+    "status": "IMPLEMENTED",
+    "update": "06"
+  },
+  {
+    "id": "F-003",
+    "name": "Custom WxHxM Input Fields",
+    "status": "NOT STARTED",
+    "update": "08"
+  },
+  {
+    "id": "F-004",
+    "name": "Triangular Geometry Abstraction",
+    "status": "NOT STARTED",
+    "update": "12"
+  },
+  {
+    "id": "F-005",
+    "name": "Android Touch Gestures",
+    "status": "NOT STARTED",
+    "update": "24"
+  }
+]

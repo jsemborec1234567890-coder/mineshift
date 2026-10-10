@@ -1808,12 +1808,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "minecore"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mineshift"
 version = "0.1.0"
 dependencies = [
  "directories",
  "eframe",
  "egui",
+ "minecore",
  "rand",
  "rusqlite",
  "serde",

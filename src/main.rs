@@ -1,10 +1,7 @@
-mod board;
 mod db;
-mod mode;
-mod solver;
-mod no_guess;
 
-use board::{Board, GameStatus, CellState};
+use minecore::board::{Board, GameStatus, CellState};
+use minecore::mode;
 use eframe::egui;
 
 fn main() -> Result<(), eframe::Error> {
@@ -188,8 +185,8 @@ impl MineShiftApp {
                 ui.add_space(10.0);
                 
                 let mode_text = match self.board.geometry {
-                    board::Geometry::Square => format!("SQUARE {}×{}", self.board.width, self.board.height),
-                    board::Geometry::Hex => format!("HEXAGON R{}", self.board.radius),
+                    minecore::board::Geometry::Square => format!("SQUARE {}×{}", self.board.width, self.board.height),
+                    minecore::board::Geometry::Hex => format!("HEXAGON R{}", self.board.radius),
                 };
                 ui.label(egui::RichText::new(mode_text).size(16.0).color(egui::Color32::from_rgb(0xA1, 0xA0, 0xA8)));
                 
@@ -243,22 +240,22 @@ impl MineShiftApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(egui::RichText::new("Restart").size(18.0)).clicked() {
                         self.board = match self.board.geometry {
-                            board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
-                            board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
+                            minecore::board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
+                            minecore::board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
                         };
                         self.board.is_no_guess = self.mode_state.id == mode::GameModeId::NoGuess;
                     }
                     
                     if self.mode_state.id == mode::GameModeId::Zen && self.board.status == GameStatus::Playing {
                         if ui.button(egui::RichText::new("Hint").size(18.0)).clicked() {
-                            let deductions = solver::Solver::deduce(&self.board);
+                            let deductions = minecore::solver::Solver::deduce(&self.board);
                             for d in deductions {
                                 match d {
-                                    solver::Deduction::Safe(x, y) => {
+                                    minecore::solver::Deduction::Safe(x, y) => {
                                         let idx = self.board.get_index(x, y);
                                         self.board.cells[idx].state = CellState::Revealed;
                                     }
-                                    solver::Deduction::Mine(x, y) => {
+                                    minecore::solver::Deduction::Mine(x, y) => {
                                         let idx = self.board.get_index(x, y);
                                         self.board.cells[idx].state = CellState::Flagged;
                                     }
@@ -281,12 +278,12 @@ impl MineShiftApp {
                 let base_spacing = 2.0;
                 
                 let raw_w = match self.board.geometry {
-                    board::Geometry::Square => (base_cell_size + base_spacing) * self.board.width as f32,
-                    board::Geometry::Hex => (base_cell_size * 3.0_f32.sqrt() + base_spacing) * self.board.width as f32,
+                    minecore::board::Geometry::Square => (base_cell_size + base_spacing) * self.board.width as f32,
+                    minecore::board::Geometry::Hex => (base_cell_size * 3.0_f32.sqrt() + base_spacing) * self.board.width as f32,
                 };
                 let raw_h = match self.board.geometry {
-                    board::Geometry::Square => (base_cell_size + base_spacing) * self.board.height as f32,
-                    board::Geometry::Hex => (base_cell_size * 1.5 + base_spacing) * self.board.height as f32,
+                    minecore::board::Geometry::Square => (base_cell_size + base_spacing) * self.board.height as f32,
+                    minecore::board::Geometry::Hex => (base_cell_size * 1.5 + base_spacing) * self.board.height as f32,
                 };
                 
                 let scale = (avail.x / raw_w).min(avail.y / raw_h).min(1.5);
@@ -318,13 +315,13 @@ impl MineShiftApp {
                             if !cell.active { continue; }
                             
                             let center = match self.board.geometry {
-                                board::Geometry::Square => {
+                                minecore::board::Geometry::Square => {
                                     rect.min + egui::vec2(
                                         x as f32 * (cell_size + spacing) + cell_size / 2.0,
                                         y as f32 * (cell_size + spacing) + cell_size / 2.0
                                     )
                                 }
-                                board::Geometry::Hex => {
+                                minecore::board::Geometry::Hex => {
                                     let q = x as f32 - self.board.radius as f32;
                                     let r = y as f32 - self.board.radius as f32;
                                     let cx = cell_size * 3.0_f32.sqrt() * (q + r / 2.0);
@@ -363,13 +360,13 @@ impl MineShiftApp {
                             let charcoal = egui::Color32::from_rgb(0x30, 0x30, 0x38);
                             
                             match self.board.geometry {
-                                board::Geometry::Square => {
+                                minecore::board::Geometry::Square => {
                                     let cell_rect = egui::Rect::from_center_size(center, egui::vec2(cell_size, cell_size));
                                     let shadow_rect = cell_rect.translate(egui::vec2(0.0, 2.0));
                                     ui.painter().rect_filled(shadow_rect, 6.0, egui::Color32::from_black_alpha(20));
                                     ui.painter().rect_filled(cell_rect, 6.0, fill_color);
                                 }
-                                board::Geometry::Hex => {
+                                minecore::board::Geometry::Hex => {
                                     let mut points = vec![];
                                     let mut shadow_points = vec![];
                                     for i in 0..6 {
@@ -431,7 +428,7 @@ impl MineShiftApp {
                             self.screen = AppScreen::GeneratingNoGuess;
                             
                             std::thread::spawn(move || {
-                                let result = crate::no_guess::generate_no_guess_board(board_clone, x, y);
+                                let result = minecore::no_guess::generate_no_guess_board(board_clone, x, y);
                                 let _ = tx.send((result, x, y));
                             });
                         } else {
@@ -454,8 +451,8 @@ impl MineShiftApp {
                                 if self.mode_state.time_limit_sec.unwrap_or(0.0) - self.board.start_time.unwrap().elapsed().as_secs_f64() > 0.0 {
                                     // Instant restart for Blitz
                                     self.board = match self.board.geometry {
-                                        board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
-                                        board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
+                                        minecore::board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
+                                        minecore::board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
                                     };
                                     true_end = false;
                                 }
@@ -464,16 +461,16 @@ impl MineShiftApp {
                                 if self.board.status == GameStatus::Won {
                                     self.mode_state.stage += 1;
                                     self.board = match self.board.geometry {
-                                        board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count + 2),
-                                        board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count + 2),
+                                        minecore::board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count + 2),
+                                        minecore::board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count + 2),
                                     };
                                     true_end = false;
                                 } else {
                                     self.mode_state.lives -= 1;
                                     if self.mode_state.lives > 0 {
                                         self.board = match self.board.geometry {
-                                            board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
-                                            board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
+                                            minecore::board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
+                                            minecore::board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
                                         };
                                         true_end = false;
                                     }
@@ -484,8 +481,8 @@ impl MineShiftApp {
                                     if self.mode_state.stage < 30 {
                                         self.mode_state.stage += 1;
                                         self.board = match self.board.geometry {
-                                            board::Geometry::Square => Board::new_square(self.board.width, self.board.height, (20 + self.mode_state.stage).min(60) as usize),
-                                            board::Geometry::Hex => Board::new_hex(self.board.radius, (20 + self.mode_state.stage).min(60) as usize),
+                                            minecore::board::Geometry::Square => Board::new_square(self.board.width, self.board.height, (20 + self.mode_state.stage).min(60) as usize),
+                                            minecore::board::Geometry::Hex => Board::new_hex(self.board.radius, (20 + self.mode_state.stage).min(60) as usize),
                                         };
                                         self.board.seed = Some(self.mode_state.stage as u64);
                                         if let (Some(db), Some(profile)) = (&self.db, &self.active_profile) {
@@ -512,7 +509,7 @@ impl MineShiftApp {
                                 let session = db::GameSession {
                                     profile_id: profile.id,
                                     mode: self.mode_state.id.name().to_string(),
-                                    geometry: match self.board.geometry { board::Geometry::Square => "Square".to_string(), board::Geometry::Hex => "Hex".to_string() },
+                                    geometry: match self.board.geometry { minecore::board::Geometry::Square => "Square".to_string(), minecore::board::Geometry::Hex => "Hex".to_string() },
                                     board_width: self.board.width as i64,
                                     board_height: self.board.height as i64,
                                     hex_radius: self.board.radius as i64,
@@ -526,7 +523,7 @@ impl MineShiftApp {
                                 
                                 if self.board.status == GameStatus::Won {
                                     let _ = db.add_xp(profile.id, 50);
-                                    if self.board.geometry == board::Geometry::Square {
+                                    if self.board.geometry == minecore::board::Geometry::Square {
                                         let _ = db.set_best_time(profile.id, "best_time_square", duration_ms / 1000);
                                         let _ = db.unlock_achievement(profile.id, "first_win");
                                         if self.board.mine_count >= 99 {

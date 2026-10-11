@@ -5,6 +5,10 @@ fn default_vol() -> f32 {
     0.8
 }
 
+fn default_music_vol() -> f32 {
+    0.65
+}
+
 fn default_sfx_vol() -> f32 {
     0.9
 }
@@ -28,6 +32,9 @@ pub struct UserSettings {
 
     #[serde(default = "default_vol")]
     pub master_volume: f32,
+
+    #[serde(default = "default_music_vol")]
+    pub music_volume: f32,
 
     #[serde(default = "default_sfx_vol")]
     pub sfx_volume: f32,
@@ -56,6 +63,7 @@ impl Default for UserSettings {
         Self {
             cursor: CursorSettings::default(),
             master_volume: 0.8,
+            music_volume: 0.65,
             sfx_volume: 0.9,
             mute_audio: false,
             pitch_variation: true,

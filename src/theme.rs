@@ -154,7 +154,7 @@ impl Theme {
             colors: Colors {
                 bg: (25, 25, 28),
                 menu_bg: (25, 25, 28),
-                card_bg: (25, 25, 28),
+                card_bg: (36, 36, 42),
 
                 covered: (45, 45, 50),
                 revealed: (60, 60, 65),
@@ -165,11 +165,8 @@ impl Theme {
                 success: (80, 230, 160),
                 button_bg: (40, 40, 45),
                 hover_highlight: (200, 180, 255, 60),
-                border: (200, 200, 210),
+                border: (60, 60, 70),
                 number_colors: vec![(80, 128, 192), (64, 160, 128), (192, 64, 64), (121, 101, 190), (128, 0, 0), (0, 128, 128), (0, 0, 0), (128, 128, 128)],
-
-
-
             },
             cursor: CursorSettings::default(),
             geometry: Geometry {
@@ -190,7 +187,7 @@ impl Theme {
             colors: Colors {
                 bg: (15, 30, 45),
                 menu_bg: (15, 30, 45),
-                card_bg: (15, 30, 45),
+                card_bg: (24, 46, 68),
 
                 covered: (30, 70, 95),
                 revealed: (60, 120, 150),
@@ -201,11 +198,8 @@ impl Theme {
                 success: (100, 255, 150),
                 button_bg: (40, 90, 120),
                 hover_highlight: (150, 240, 255, 90),
-                border: (200, 200, 210),
+                border: (45, 85, 120),
                 number_colors: vec![(80, 128, 192), (64, 160, 128), (192, 64, 64), (121, 101, 190), (128, 0, 0), (0, 128, 128), (0, 0, 0), (128, 128, 128)],
-
-
-
             },
             cursor: CursorSettings::default(),
             geometry: Geometry {
@@ -226,7 +220,7 @@ impl Theme {
             colors: Colors {
                 bg: (248, 245, 240),
                 menu_bg: (248, 245, 240),
-                card_bg: (248, 245, 240),
+                card_bg: (255, 254, 252),
 
                 covered: (220, 215, 205),
                 revealed: (250, 248, 245),
@@ -237,11 +231,8 @@ impl Theme {
                 success: (60, 160, 100),
                 button_bg: (230, 225, 215),
                 hover_highlight: (0, 0, 0, 20),
-                border: (200, 200, 210),
+                border: (215, 210, 200),
                 number_colors: vec![(80, 128, 192), (64, 160, 128), (192, 64, 64), (121, 101, 190), (128, 0, 0), (0, 128, 128), (0, 0, 0), (128, 128, 128)],
-
-
-
             },
             cursor: CursorSettings::default(),
             geometry: Geometry {
@@ -262,7 +253,7 @@ impl Theme {
             colors: Colors {
                 bg: (192, 192, 192),
                 menu_bg: (192, 192, 192),
-                card_bg: (192, 192, 192),
+                card_bg: (214, 214, 214),
 
                 covered: (192, 192, 192),
                 revealed: (220, 220, 220),
@@ -273,11 +264,8 @@ impl Theme {
                 success: (0, 128, 0),
                 button_bg: (192, 192, 192),
                 hover_highlight: (255, 255, 255, 120),
-                border: (200, 200, 210),
+                border: (128, 128, 128),
                 number_colors: vec![(80, 128, 192), (64, 160, 128), (192, 64, 64), (121, 101, 190), (128, 0, 0), (0, 128, 128), (0, 0, 0), (128, 128, 128)],
-
-
-
             },
             cursor: CursorSettings::default(),
             geometry: Geometry {
@@ -298,7 +286,7 @@ impl Theme {
             colors: Colors {
                 bg: (10, 5, 20),
                 menu_bg: (10, 5, 20),
-                card_bg: (10, 5, 20),
+                card_bg: (28, 14, 52),
 
                 covered: (40, 20, 60),
                 revealed: (70, 30, 90),
@@ -309,11 +297,8 @@ impl Theme {
                 success: (50, 255, 255),
                 button_bg: (60, 20, 80),
                 hover_highlight: (255, 100, 255, 150),
-                border: (200, 200, 210),
+                border: (80, 20, 110),
                 number_colors: vec![(80, 128, 192), (64, 160, 128), (192, 64, 64), (121, 101, 190), (128, 0, 0), (0, 128, 128), (0, 0, 0), (128, 128, 128)],
-
-
-
             },
             cursor: CursorSettings::default(),
             geometry: Geometry {

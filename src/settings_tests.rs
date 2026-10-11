@@ -50,6 +50,7 @@ mod tests {
         let settings: UserSettings = serde_json::from_str(empty_json).expect("Default settings from empty JSON");
         assert!((settings.master_volume - 0.8).abs() < 1e-4);
         assert!((settings.sfx_volume - 0.9).abs() < 1e-4);
+        assert!((settings.music_volume - 0.65).abs() < 1e-4);
         assert_eq!(settings.mute_audio, false);
         assert_eq!(settings.pitch_variation, true);
         assert!((settings.screen_shake - 1.0).abs() < 1e-4);
@@ -62,6 +63,7 @@ mod tests {
         let mut original = UserSettings::default();
         original.master_volume = 0.42;
         original.sfx_volume = 0.77;
+        original.music_volume = 0.55;
         original.mute_audio = true;
         original.screen_shake = 1.85;
         original.cursor.size = 2.4;

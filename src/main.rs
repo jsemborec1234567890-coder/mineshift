@@ -45,10 +45,27 @@ fn configure_fonts(ctx: &egui::Context) {
 
 fn main() -> Result<(), eframe::Error> {
     let args: Vec<String> = std::env::args().collect();
+    let mut width = 1000.0;
+    let mut height = 700.0;
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--width" && i + 1 < args.len() {
+            if let Ok(w) = args[i + 1].parse::<f32>() {
+                width = w;
+            }
+        }
+        if args[i] == "--height" && i + 1 < args.len() {
+            if let Ok(h) = args[i + 1].parse::<f32>() {
+                height = h;
+            }
+        }
+        i += 1;
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1000.0, 700.0])
-            .with_min_inner_size([800.0, 600.0]),
+            .with_inner_size([width, height])
+            .with_min_inner_size([600.0, 400.0]),
         ..Default::default()
     };
 
@@ -318,7 +335,19 @@ impl MineShiftApp {
                             "mainmenu" | "main-menu" => {
                                 self.screen = AppScreen::MainMenu;
                             }
-                            "gameplay-square" => {
+                            "gamemodes" | "game-modes" => {
+                                self.screen = AppScreen::GameModes;
+                            }
+                            "profiles" => {
+                                self.screen = AppScreen::Profiles;
+                            }
+                            "profile-cosmetics" | "cosmetics" => {
+                                self.screen = AppScreen::ProfileCosmetics;
+                            }
+                            "themestudio" | "theme-studio" | "customize" => {
+                                self.screen = AppScreen::ThemeStudio;
+                            }
+                            "gameplay" | "gameplay-square" => {
                                 self.screen = AppScreen::Gameplay;
                                 self.board = Board::new_square(9, 9, 10);
                             }
@@ -330,10 +359,129 @@ impl MineShiftApp {
                         }
                     }
                 }
+                "--theme-tab" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        match args[i].as_str() {
+                            "colors" => self.theme_studio_tab = ThemeStudioTab::Colors,
+                            "geometry" => self.theme_studio_tab = ThemeStudioTab::Geometry,
+                            "numbers" => self.theme_studio_tab = ThemeStudioTab::Numbers,
+                            _ => {}
+                        }
+                    }
+                }
+                "--achieve-filter" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        match args[i].as_str() {
+                            "all" => self.achievement_filter = AchievementFilter::All,
+                            "unlocked" => self.achievement_filter = AchievementFilter::Unlocked,
+                            "locked" => self.achievement_filter = AchievementFilter::Locked,
+                            _ => {}
+                        }
+                    }
+                }
+                "--mode" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        let mode_id = match args[i].as_str() {
+                            "classic" => mode::GameModeId::Classic,
+                            "sprint" => mode::GameModeId::Sprint,
+                            "noguess" => mode::GameModeId::NoGuess,
+                            "blitz" => mode::GameModeId::Blitz,
+                            "survival" => mode::GameModeId::Survival,
+                            "daily" => mode::GameModeId::Daily,
+                            "expedition" => mode::GameModeId::Expedition,
+                            "zen" => mode::GameModeId::Zen,
+                            "sandbox" => mode::GameModeId::Sandbox,
+                            _ => mode::GameModeId::Classic,
+                        };
+                        self.mode_state = mode::ModeState::new(mode_id);
+                        self.screen = AppScreen::Gameplay;
+                    }
+                }
+                "--geometry" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        match args[i].as_str() {
+                            "square" => self.board = Board::new_square(9, 9, 10),
+                            "hex" => self.board = Board::new_hex(5, 10),
+                            _ => {}
+                        }
+                    }
+                }
+                "--board-size" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        match args[i].as_str() {
+                            "beginner" => self.board = Board::new_square(9, 9, 10),
+                            "intermediate" => self.board = Board::new_square(16, 16, 40),
+                            "expert" => self.board = Board::new_square(30, 16, 99),
+                            "hex-small" => self.board = Board::new_hex(3, 10),
+                            "hex-med" => self.board = Board::new_hex(5, 20),
+                            "hex-large" => self.board = Board::new_hex(7, 45),
+                            _ => {}
+                        }
+                    }
+                }
+                "--game-state" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        match args[i].as_str() {
+                            "partial" => {
+                                self.board.first_click = false;
+                                self.board.start_time = Some(std::time::Instant::now());
+                                if self.board.cells.len() > 10 {
+                                    self.board.cells[0].state = CellState::Revealed;
+                                    self.board.cells[0].adjacent_mines = 0;
+                                    self.board.cells[1].state = CellState::Revealed;
+                                    self.board.cells[1].adjacent_mines = 1;
+                                    self.board.cells[2].state = CellState::Revealed;
+                                    self.board.cells[2].adjacent_mines = 2;
+                                    self.board.cells[3].state = CellState::Flagged;
+                                    self.board.flags_placed = 1;
+                                }
+                            }
+                            "won" => {
+                                self.board.status = GameStatus::Won;
+                                self.board.start_time = Some(std::time::Instant::now());
+                                self.board.end_time = Some(std::time::Instant::now());
+                                for cell in &mut self.board.cells {
+                                    if !cell.is_mine {
+                                        cell.state = CellState::Revealed;
+                                    } else {
+                                        cell.state = CellState::Flagged;
+                                    }
+                                }
+                                self.board.flags_placed = self.board.mine_count;
+                            }
+                            "lost" => {
+                                self.board.status = GameStatus::Lost;
+                                self.board.start_time = Some(std::time::Instant::now());
+                                self.board.end_time = Some(std::time::Instant::now());
+                                for cell in &mut self.board.cells {
+                                    if cell.is_mine {
+                                        cell.state = CellState::Revealed;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 "--theme" => {
                     if i + 1 < args.len() {
                         i += 1;
                         self.set_active_theme(&args[i]);
+                    }
+                }
+                "--cursor-size" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        if let Ok(sz) = args[i].parse::<f32>() {
+                            self.settings.cursor.size = sz;
+                            self.theme.cursor.size = sz;
+                        }
                     }
                 }
                 "--saved-feedback" => {

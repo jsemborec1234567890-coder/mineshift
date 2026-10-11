@@ -674,4 +674,91 @@ mod tests {
             "200 DB writes must execute under 100ms"
         );
     }
+
+    #[test]
+    fn test_tactical_rationing_challenge_end_to_end() {
+        use minecore::board::{Board, GameStatus};
+        use minecore::challenge::MasteryChallenge;
+        use minecore::rules::FlagPolicy;
+
+        let catalog = MasteryChallenge::catalog();
+        let chal = catalog
+            .into_iter()
+            .find(|c| c.id == "chal_res_beg")
+            .expect("Tactical Rationing challenge 'chal_res_beg' must exist");
+
+        assert_eq!(chal.title, "Tactical Rationing");
+        assert_eq!(chal.ruleset.mine_count, 10);
+        assert_eq!(
+            chal.ruleset.flag_policy,
+            FlagPolicy::LimitedFlags { max_flags: 5 }
+        );
+
+        // 1. Must validate with Ok(()) — rationing (0 < max_flags < mine_count) is valid!
+        assert!(
+            chal.ruleset.validate().is_ok(),
+            "Tactical Rationing ruleset must validate without error"
+        );
+
+        // 2. Initialize board from ruleset
+        let mut board = Board::from_ruleset(chal.ruleset.clone());
+        assert_eq!(board.can_flag(), true);
+        assert_eq!(board.remaining_flags(), Some(5));
+        assert_eq!(board.flags_placed, 0);
+
+        // 3. Place exactly 5 flags
+        board.toggle_flag(0, 0);
+        board.toggle_flag(1, 0);
+        board.toggle_flag(2, 0);
+        board.toggle_flag(3, 0);
+        board.toggle_flag(4, 0);
+
+        assert_eq!(board.flags_placed, 5);
+        assert_eq!(board.remaining_flags(), Some(0));
+        assert_eq!(board.can_flag(), false, "Cannot place more flags when limit is reached");
+
+        // 4. Attempt to place 6th flag -> must be blocked
+        board.toggle_flag(5, 0);
+        assert_eq!(board.flags_placed, 5, "Flag count must remain at max_flags 5");
+
+        // 5. Unflag cell (0, 0) -> frees 1 flag
+        board.toggle_flag(0, 0);
+        assert_eq!(board.flags_placed, 4);
+        assert_eq!(board.remaining_flags(), Some(1));
+        assert_eq!(board.can_flag(), true);
+
+        // 6. Simulate uncovering all safe cells with only 4 flags placed -> victory must trigger!
+        board.first_click = false;
+        // Make cells (8, 0..9) and (7, 0) the 10 mines
+        for cell in &mut board.cells {
+            cell.is_mine = false;
+        }
+        for y in 0..9 {
+            let idx = board.get_index(8, y);
+            board.cells[idx].is_mine = true;
+        }
+        let m10 = board.get_index(7, 0);
+        board.cells[m10].is_mine = true;
+
+        // Reveal all non-mine cells except the last one (0, 1)
+        for y in 0..board.height {
+            for x in 0..board.width {
+                if x == 0 && y == 1 {
+                    continue; // Leave this one covered for final reveal
+                }
+                let idx = board.get_index(x, y);
+                if !board.cells[idx].is_mine {
+                    board.cells[idx].state = minecore::board::CellState::Revealed;
+                }
+            }
+        }
+        // Click the final safe covered cell
+        board.reveal(0, 1);
+        assert_eq!(
+            board.status,
+            GameStatus::Won,
+            "Tactical Rationing can be legitimately won with only a subset of mines flagged"
+        );
+    }
 }
+

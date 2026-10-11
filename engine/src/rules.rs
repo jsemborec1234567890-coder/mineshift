@@ -325,6 +325,10 @@ mod tests {
 
         rs.flag_policy = FlagPolicy::LimitedFlags { max_flags: 10 };
         assert!(rs.validate().is_ok());
+
+        // Tactical Rationing: 5 flags for 10 mines (0 < max_flags < mine_count) is completely valid!
+        rs.flag_policy = FlagPolicy::LimitedFlags { max_flags: 5 };
+        assert!(rs.validate().is_ok());
     }
 
     #[test]

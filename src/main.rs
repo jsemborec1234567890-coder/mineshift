@@ -1,5 +1,7 @@
 mod db;
 pub mod theme;
+#[cfg(test)]
+mod settings_tests;
 
 use minecore::board::{Board, GameStatus, CellState};
 use minecore::mode;
@@ -39,10 +41,24 @@ enum AppScreen {
     GeneratingNoGuess,
     ThemeStudio,
     ProfileCosmetics,
+    Settings,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum CustomCursorState {
+    Default,
+    UIHover,
+    BoardHover,
+    BoardFlag,
+    Disabled,
+    Loading,
+    Victory,
+    Defeat,
 }
 
 struct MineShiftApp {
     screen: AppScreen,
+    cursor_state: CustomCursorState,
     board: Board,
     mode_state: mode::ModeState,
     db: Option<db::Database>,
@@ -90,6 +106,7 @@ impl MineShiftApp {
 
         let mut app = Self {
             screen,
+            cursor_state: CustomCursorState::Default,
             board: Board::new_square(9, 9, 10),
             mode_state: mode::ModeState::new(mode::GameModeId::Classic),
             db,
@@ -180,7 +197,10 @@ impl MineShiftApp {
             }
             ui.add_space(12.0);
             if ui.add(egui::Button::new(egui::RichText::new("SETTINGS").size(18.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(400.0, 48.0))).clicked() {
-                // Future settings screen, or just Exit for now
+                self.screen = AppScreen::Settings;
+            }
+            ui.add_space(12.0);
+            if ui.add(egui::Button::new(egui::RichText::new("EXIT").size(18.0).color(egui::Color32::from_rgb(0xE8, 0x5C, 0x60))).fill(secondary_fill).min_size(egui::vec2(400.0, 48.0))).clicked() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
@@ -368,6 +388,13 @@ impl MineShiftApp {
                                 if dist < cell_size / 2.0 && dist < closest_dist {
                                     closest_dist = dist;
                                     hovered_cell = Some((x, y));
+                                    if cell.state == minecore::board::CellState::Flagged {
+                                        self.cursor_state = CustomCursorState::BoardFlag;
+                                    } else if cell.state == minecore::board::CellState::Covered {
+                                        self.cursor_state = CustomCursorState::BoardHover;
+                                    } else {
+                                        self.cursor_state = CustomCursorState::Default;
+                                    }
                                     if response.clicked() { clicked_cell = Some((x, y)); }
                                     if response.secondary_clicked() { secondary_clicked_cell = Some((x, y)); }
                                     if response.middle_clicked() { middle_clicked_cell = Some((x, y)); }
@@ -1161,6 +1188,42 @@ impl MineShiftApp {
             });
         });
     }
+    fn show_settings(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            if ui.button("Back").clicked() {
+                self.screen = AppScreen::MainMenu;
+            }
+            ui.label(egui::RichText::new("SETTINGS").size(24.0).strong().color(self.theme.colors.text_primary()));
+        });
+        ui.separator();
+        
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.heading("Cursor & Accessibility");
+            ui.checkbox(&mut self.theme.cursor.enabled, "Enable Custom Cursor");
+            if self.theme.cursor.enabled {
+                ui.add(egui::Slider::new(&mut self.theme.cursor.size, 0.5..=3.0).text("Cursor Size"));
+                ui.checkbox(&mut self.theme.cursor.trail, "Enable Trail");
+            }
+            ui.checkbox(&mut self.theme.cursor.reduced_motion, "Reduced Motion (Disables Cursor Trail)");
+            
+            ui.add_space(16.0);
+            ui.heading("Animations");
+            ui.add(egui::Slider::new(&mut self.theme.geometry.animation_speed, 0.0..=5.0).text("Animation Speed"));
+            
+            ui.add_space(32.0);
+            if ui.button("Save Settings to Profile").clicked() {
+                if let (Some(prof), Some(db)) = (&self.active_profile, &self.db) {
+                    if self.theme.is_custom {
+                        let data = serde_json::to_string(&self.theme).unwrap();
+                        let _ = db.save_custom_theme(prof.id, &self.theme.id, &self.theme.name, &data);
+                    } else {
+                        let _ = db.set_profile_theme(prof.id, &self.theme.id);
+                    }
+                }
+            }
+        });
+    }
+
     fn show_profile_cosmetics(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui.button("Back").clicked() {
@@ -1244,6 +1307,7 @@ fn color_picker(ui: &mut eframe::egui::Ui, color: &mut (u8, u8, u8)) {
 
 impl eframe::App for MineShiftApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.cursor_state = CustomCursorState::Default;
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             if !matches!(self.screen, AppScreen::MainMenu) {
                 if matches!(self.screen, AppScreen::Profiles) && self.active_profile.is_none() {
@@ -1268,6 +1332,7 @@ impl eframe::App for MineShiftApp {
                 AppScreen::GeneratingNoGuess => self.show_generating(ui),
                 AppScreen::ThemeStudio => self.show_theme_studio(ui),
                 AppScreen::ProfileCosmetics => self.show_profile_cosmetics(ui),
+                AppScreen::Settings => self.show_settings(ui),
             }
         });
     }

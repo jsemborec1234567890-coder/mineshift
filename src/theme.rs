@@ -8,6 +8,27 @@ pub struct Theme {
     pub is_custom: bool,
     pub colors: Colors,
     pub geometry: Geometry,
+    #[serde(default)]
+    pub cursor: CursorSettings,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CursorSettings {
+    pub enabled: bool,
+    pub size: f32,
+    pub trail: bool,
+    pub reduced_motion: bool,
+}
+
+impl Default for CursorSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            size: 1.0,
+            trail: false,
+            reduced_motion: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -114,6 +135,7 @@ impl Theme {
 
 
             },
+            cursor: CursorSettings::default(),
             geometry: Geometry {
                 square_radius: 6.0,
                 cell_spacing: 4.0,
@@ -149,6 +171,7 @@ impl Theme {
 
 
             },
+            cursor: CursorSettings::default(),
             geometry: Geometry {
                 square_radius: 4.0,
                 cell_spacing: 3.0,
@@ -184,6 +207,7 @@ impl Theme {
 
 
             },
+            cursor: CursorSettings::default(),
             geometry: Geometry {
                 square_radius: 8.0,
                 cell_spacing: 4.0,
@@ -219,6 +243,7 @@ impl Theme {
 
 
             },
+            cursor: CursorSettings::default(),
             geometry: Geometry {
                 square_radius: 2.0,
                 cell_spacing: 3.0,
@@ -254,6 +279,7 @@ impl Theme {
 
 
             },
+            cursor: CursorSettings::default(),
             geometry: Geometry {
                 square_radius: 0.0,
                 cell_spacing: 1.0,
@@ -289,6 +315,7 @@ impl Theme {
 
 
             },
+            cursor: CursorSettings::default(),
             geometry: Geometry {
                 square_radius: 12.0,
                 cell_spacing: 6.0,

@@ -1,7 +1,13 @@
+mod audio;
 mod db;
+mod juice;
+mod particles;
+pub mod settings;
 pub mod theme;
 #[cfg(test)]
 mod settings_tests;
+
+use audio::SoundEffect;
 
 use minecore::board::{Board, GameStatus, CellState};
 use minecore::mode;
@@ -69,9 +75,45 @@ struct MineShiftApp {
     rename_buffer: String,
     generation_rx: Option<std::sync::mpsc::Receiver<(Option<Board>, usize, usize)>>,
     theme: crate::theme::Theme,
+    settings: crate::settings::UserSettings,
+    audio: crate::audio::SoundManager,
+    particles: crate::particles::ParticleSystem,
+    shake: crate::juice::TraumaShake,
+    anim_tracker: crate::juice::CellAnimationTracker,
+    last_frame_time: f64,
 }
 
 impl MineShiftApp {
+    fn sync_settings(&mut self) {
+        self.audio.master_volume = self.settings.master_volume;
+        self.audio.sfx_volume = self.settings.sfx_volume;
+        self.audio.muted = self.settings.mute_audio;
+        self.audio.pitch_variation = self.settings.pitch_variation;
+        self.particles.enabled = self.settings.particles_enabled;
+        self.shake.intensity = if self.settings.cursor.reduced_motion { 0.0 } else { self.settings.screen_shake };
+        self.theme.cursor = self.settings.cursor.clone();
+        self.theme.geometry.animation_speed = self.settings.animation_speed;
+    }
+
+    fn load_profile_settings(&mut self) {
+        if let (Some(prof), Some(db)) = (&self.active_profile, &self.db) {
+            if let Ok(Some(json)) = db.get_profile_settings(prof.id) {
+                if let Ok(s) = serde_json::from_str::<crate::settings::UserSettings>(&json) {
+                    self.settings = s;
+                }
+            }
+        }
+        self.sync_settings();
+    }
+
+    fn save_current_settings(&self) {
+        if let (Some(prof), Some(db)) = (&self.active_profile, &self.db) {
+            if let Ok(json) = serde_json::to_string(&self.settings) {
+                let _ = db.save_profile_settings(prof.id, &json);
+            }
+        }
+    }
+
     fn apply_profile_theme(&mut self) {
         if let Some(ref prof) = self.active_profile {
             if let Some(theme) = crate::theme::Theme::get_preset(&prof.selected_theme_id) {
@@ -87,7 +129,10 @@ impl MineShiftApp {
                 }
             }
         }
+        self.theme.cursor = self.settings.cursor.clone();
+        self.theme.geometry.animation_speed = self.settings.animation_speed;
     }
+
     fn new() -> Self {
         let db = db::Database::new().ok();
         let mut profiles = Vec::new();
@@ -117,7 +162,14 @@ impl MineShiftApp {
             rename_buffer: String::new(),
             generation_rx: None,
             theme: crate::theme::Theme::soft_circuit(),
+            settings: crate::settings::UserSettings::default(),
+            audio: crate::audio::SoundManager::new(),
+            particles: crate::particles::ParticleSystem::new(),
+            shake: crate::juice::TraumaShake::new(),
+            anim_tracker: crate::juice::CellAnimationTracker::new(),
+            last_frame_time: 0.0,
         };
+        app.load_profile_settings();
         app.apply_profile_theme();
         app
     }
@@ -163,6 +215,7 @@ impl MineShiftApp {
             ).fill(egui::Color32::from_rgb(121, 101, 190)).min_size(egui::vec2(400.0, 54.0));
             
             if ui.add(play_btn).clicked() {
+                self.audio.play(SoundEffect::UiClick);
                 self.screen = AppScreen::GameModes;
             }
             
@@ -173,6 +226,7 @@ impl MineShiftApp {
             ).fill(egui::Color32::from_rgb(208, 188, 255)).min_size(egui::vec2(400.0, 54.0));
             
             if ui.add(customize_btn).clicked() {
+                self.audio.play(SoundEffect::UiClick);
                 self.screen = AppScreen::ThemeStudio;
             }
             
@@ -182,6 +236,7 @@ impl MineShiftApp {
             let text_color = egui::Color32::from_rgb(0x4A, 0x4A, 0x4A);
             
             if ui.add(egui::Button::new(egui::RichText::new("PROFILES").size(18.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(400.0, 48.0))).clicked() {
+                self.audio.play(SoundEffect::UiClick);
                 if let Some(ref d) = self.db {
                     self.profiles = d.get_profiles().unwrap_or_default();
                 }
@@ -189,18 +244,22 @@ impl MineShiftApp {
             }
             ui.add_space(12.0);
             if ui.add(egui::Button::new(egui::RichText::new("STATISTICS").size(18.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(400.0, 48.0))).clicked() {
+                self.audio.play(SoundEffect::UiClick);
                 self.screen = AppScreen::Statistics;
             }
             ui.add_space(12.0);
             if ui.add(egui::Button::new(egui::RichText::new("ACHIEVEMENTS").size(18.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(400.0, 48.0))).clicked() {
+                self.audio.play(SoundEffect::UiClick);
                 self.screen = AppScreen::Achievements;
             }
             ui.add_space(12.0);
             if ui.add(egui::Button::new(egui::RichText::new("SETTINGS").size(18.0).color(text_color)).fill(secondary_fill).min_size(egui::vec2(400.0, 48.0))).clicked() {
+                self.audio.play(SoundEffect::UiClick);
                 self.screen = AppScreen::Settings;
             }
             ui.add_space(12.0);
             if ui.add(egui::Button::new(egui::RichText::new("EXIT").size(18.0).color(egui::Color32::from_rgb(0xE8, 0x5C, 0x60))).fill(secondary_fill).min_size(egui::vec2(400.0, 48.0))).clicked() {
+                self.audio.play(SoundEffect::UiClick);
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
@@ -292,6 +351,8 @@ impl MineShiftApp {
                 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(egui::RichText::new("Restart").size(18.0)).clicked() {
+                        self.audio.play(SoundEffect::UiClick);
+                        self.anim_tracker.clear();
                         self.board = match self.board.geometry {
                             minecore::board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
                             minecore::board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
@@ -367,21 +428,25 @@ impl MineShiftApp {
                             let cell = cell.unwrap();
                             if !cell.active { continue; }
                             
+                            let time = ui.input(|i| i.time);
+                            let shake_offset = self.shake.get_offset(time);
                             let center = match self.board.geometry {
                                 minecore::board::Geometry::Square => {
                                     rect.min + egui::vec2(
                                         x as f32 * (cell_size + spacing) + cell_size / 2.0,
                                         y as f32 * (cell_size + spacing) + cell_size / 2.0
-                                    )
+                                    ) + shake_offset
                                 }
                                 minecore::board::Geometry::Hex => {
                                     let q = x as f32 - self.board.radius as f32;
                                     let r = y as f32 - self.board.radius as f32;
                                     let cx = cell_size * 3.0_f32.sqrt() * (q + r / 2.0);
                                     let cy = cell_size * 1.5 * r;
-                                    rect.min + egui::vec2(board_w / 2.0 + cx, board_h / 2.0 + cy)
+                                    rect.min + egui::vec2(board_w / 2.0 + cx, board_h / 2.0 + cy) + shake_offset
                                 }
                             };
+                            let bounce = self.anim_tracker.get_bounce_scale(x, y, time, self.settings.animation_speed);
+                            let draw_cell_size = cell_size * bounce;
                             
                             if let Some(pos) = pointer_pos {
                                 let dist = (pos - center).length();
@@ -421,7 +486,7 @@ impl MineShiftApp {
                             
                             match self.board.geometry {
                                 minecore::board::Geometry::Square => {
-                                    let cell_rect = egui::Rect::from_center_size(center, egui::vec2(cell_size, cell_size));
+                                    let cell_rect = egui::Rect::from_center_size(center, egui::vec2(draw_cell_size, draw_cell_size));
                                     let shadow_rect = cell_rect.translate(egui::vec2(0.0, 2.0));
                                     ui.painter().rect_filled(shadow_rect, 6.0, egui::Color32::from_black_alpha(20));
                                     ui.painter().rect_filled(cell_rect, 6.0, fill_color);
@@ -432,7 +497,7 @@ impl MineShiftApp {
                                     for i in 0..6 {
                                         let angle_deg = 60.0 * i as f32 - 30.0;
                                         let angle_rad = angle_deg.to_radians();
-                                        let p = center + egui::vec2(angle_rad.cos() * cell_size * 0.95, angle_rad.sin() * cell_size * 0.95);
+                                        let p = center + egui::vec2(angle_rad.cos() * draw_cell_size * 0.95, angle_rad.sin() * draw_cell_size * 0.95);
                                         points.push(p);
                                         shadow_points.push(p + egui::vec2(0.0, 2.0));
                                     }
@@ -479,6 +544,7 @@ impl MineShiftApp {
                     }
                     
                     let old_status = self.board.status;
+                    let time = ui.input(|i| i.time);
                     if let Some((x, y)) = clicked_cell { 
                         if self.board.first_click && self.board.is_no_guess {
                             // Start generation thread
@@ -492,11 +558,61 @@ impl MineShiftApp {
                                 let _ = tx.send((result, x, y));
                             });
                         } else {
-                            self.board.reveal(x, y); 
+                            let was_covered = self.board.get_cell(x, y).map(|c| c.state == CellState::Covered).unwrap_or(false);
+                            if was_covered {
+                                self.audio.play(SoundEffect::TileClick);
+                                self.anim_tracker.on_reveal(x, y, time);
+                                let pt = rect.min + egui::vec2(x as f32 * (cell_size + spacing) + cell_size / 2.0, y as f32 * (cell_size + spacing) + cell_size / 2.0);
+                                self.particles.spawn_tile_pop(pt, self.theme.colors.accent(), self.settings.cursor.reduced_motion);
+                                self.shake.add_trauma(0.04);
+                            }
+                            self.board.reveal(x, y);
+                            let pt = rect.min + egui::vec2(x as f32 * (cell_size + spacing) + cell_size / 2.0, y as f32 * (cell_size + spacing) + cell_size / 2.0);
+                            if self.board.status == GameStatus::Lost {
+                                self.audio.play(SoundEffect::Explosion);
+                                self.audio.play(SoundEffect::Defeat);
+                                self.shake.add_trauma(0.85);
+                                self.particles.spawn_explosion(pt, self.theme.colors.danger(), self.settings.cursor.reduced_motion);
+                            } else if self.board.status == GameStatus::Won {
+                                self.audio.play(SoundEffect::Victory);
+                                self.particles.spawn_victory(rect, 80, self.settings.cursor.reduced_motion);
+                                self.shake.add_trauma(0.2);
+                            } else if let Some(c) = self.board.get_cell(x, y) {
+                                if c.state == CellState::Revealed {
+                                    self.audio.play(SoundEffect::TileReveal(c.adjacent_mines));
+                                }
+                            }
                         }
                     }
-                    if let Some((x, y)) = secondary_clicked_cell { self.board.toggle_flag(x, y); }
-                    if let Some((x, y)) = middle_clicked_cell { self.board.chord(x, y); }
+                    if let Some((x, y)) = secondary_clicked_cell { 
+                        let was_flagged = self.board.get_cell(x, y).map(|c| c.state == CellState::Flagged).unwrap_or(false);
+                        self.board.toggle_flag(x, y);
+                        let pt = rect.min + egui::vec2(x as f32 * (cell_size + spacing) + cell_size / 2.0, y as f32 * (cell_size + spacing) + cell_size / 2.0);
+                        if !was_flagged {
+                            self.audio.play(SoundEffect::FlagPlace);
+                            self.particles.spawn_tile_pop(pt, self.theme.colors.danger(), self.settings.cursor.reduced_motion);
+                            self.shake.add_trauma(0.04);
+                        } else {
+                            self.audio.play(SoundEffect::FlagRemove);
+                        }
+                    }
+                    if let Some((x, y)) = middle_clicked_cell { 
+                        self.audio.play(SoundEffect::Chord);
+                        self.shake.add_trauma(0.12);
+                        let pt = rect.min + egui::vec2(x as f32 * (cell_size + spacing) + cell_size / 2.0, y as f32 * (cell_size + spacing) + cell_size / 2.0);
+                        self.particles.spawn_tile_pop(pt, self.theme.colors.accent(), self.settings.cursor.reduced_motion);
+                        self.board.chord(x, y);
+                        if self.board.status == GameStatus::Lost {
+                            self.audio.play(SoundEffect::Explosion);
+                            self.audio.play(SoundEffect::Defeat);
+                            self.shake.add_trauma(0.85);
+                            self.particles.spawn_explosion(pt, self.theme.colors.danger(), self.settings.cursor.reduced_motion);
+                        } else if self.board.status == GameStatus::Won {
+                            self.audio.play(SoundEffect::Victory);
+                            self.particles.spawn_victory(rect, 80, self.settings.cursor.reduced_motion);
+                            self.shake.add_trauma(0.2);
+                        }
+                    }
                     
                     if old_status == GameStatus::Playing && self.board.status != GameStatus::Playing {
                         let mut true_end = true;
@@ -1190,37 +1306,178 @@ impl MineShiftApp {
     }
     fn show_settings(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui.button("Back").clicked() {
+            if ui.button(egui::RichText::new("◀ Back to Menu").size(16.0)).clicked() {
+                self.audio.play(SoundEffect::UiClick);
                 self.screen = AppScreen::MainMenu;
             }
-            ui.label(egui::RichText::new("SETTINGS").size(24.0).strong().color(self.theme.colors.text_primary()));
+            ui.add_space(16.0);
+            ui.label(egui::RichText::new("⚙ SETTINGS & GAME FEEL").size(24.0).strong().color(self.theme.colors.text_primary()));
         });
         ui.separator();
         
         egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.heading("Cursor & Accessibility");
-            ui.checkbox(&mut self.theme.cursor.enabled, "Enable Custom Cursor");
-            if self.theme.cursor.enabled {
-                ui.add(egui::Slider::new(&mut self.theme.cursor.size, 0.5..=3.0).text("Cursor Size"));
-                ui.checkbox(&mut self.theme.cursor.trail, "Enable Trail");
-            }
-            ui.checkbox(&mut self.theme.cursor.reduced_motion, "Reduced Motion (Disables Cursor Trail)");
+            ui.set_max_width(720.0);
             
+            // --- AUDIO & HAPTICS ---
+            ui.heading("🔊 Sound Effects & Audio");
+            ui.group(|ui| {
+                if ui.checkbox(&mut self.settings.mute_audio, "Mute All Sound Effects").changed() {
+                    self.sync_settings();
+                    self.save_current_settings();
+                }
+                
+                ui.add_enabled_ui(!self.settings.mute_audio, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Master Volume:");
+                        if ui.add(egui::Slider::new(&mut self.settings.master_volume, 0.0..=1.0).custom_formatter(|n, _| format!("{:.0}%", n * 100.0))).changed() {
+                            self.sync_settings();
+                            self.save_current_settings();
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("SFX Volume:");
+                        if ui.add(egui::Slider::new(&mut self.settings.sfx_volume, 0.0..=1.0).custom_formatter(|n, _| format!("{:.0}%", n * 100.0))).changed() {
+                            self.sync_settings();
+                            self.save_current_settings();
+                        }
+                    });
+                    if ui.checkbox(&mut self.settings.pitch_variation, "Dynamic Pitch Variation (Tactile Audio Cascades)").changed() {
+                        self.sync_settings();
+                        self.save_current_settings();
+                    }
+                    
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Interactive Sound Test:").strong());
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("▶ Click").clicked() { self.audio.play(SoundEffect::TileClick); }
+                        if ui.button("▶ Reveal (Low)").clicked() { self.audio.play(SoundEffect::TileReveal(1)); }
+                        if ui.button("▶ Reveal (High)").clicked() { self.audio.play(SoundEffect::TileReveal(5)); }
+                        if ui.button("▶ Flag Lock").clicked() { self.audio.play(SoundEffect::FlagPlace); }
+                        if ui.button("▶ Chord Chime").clicked() { self.audio.play(SoundEffect::Chord); }
+                        if ui.button("💥 Detonation").clicked() { self.audio.play(SoundEffect::Explosion); self.shake.add_trauma(0.8); }
+                        if ui.button("⚠️ Defeat Drone").clicked() { self.audio.play(SoundEffect::Defeat); }
+                        if ui.button("🏆 Fanfare").clicked() { self.audio.play(SoundEffect::Victory); }
+                    });
+                });
+            });
+
             ui.add_space(16.0);
-            ui.heading("Animations");
-            ui.add(egui::Slider::new(&mut self.theme.geometry.animation_speed, 0.0..=5.0).text("Animation Speed"));
-            
-            ui.add_space(32.0);
-            if ui.button("Save Settings to Profile").clicked() {
-                if let (Some(prof), Some(db)) = (&self.active_profile, &self.db) {
-                    if self.theme.is_custom {
-                        let data = serde_json::to_string(&self.theme).unwrap();
-                        let _ = db.save_custom_theme(prof.id, &self.theme.id, &self.theme.name, &data);
-                    } else {
-                        let _ = db.set_profile_theme(prof.id, &self.theme.id);
+
+            // --- TACTILE FEEL & SCREEN SHAKE ---
+            ui.heading("⚡ Tactile Feel & Screen Shake");
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Screen Shake Intensity:");
+                    if ui.add(egui::Slider::new(&mut self.settings.screen_shake, 0.0..=2.0)).changed() {
+                        self.sync_settings();
+                        self.save_current_settings();
+                    }
+                });
+                if ui.button("💥 Test Screen Shake Impulse").clicked() {
+                    self.shake.add_trauma(0.85);
+                }
+                
+                ui.add_space(4.0);
+                if ui.checkbox(&mut self.settings.particles_enabled, "Enable Particle Effects (Debris, Shockwaves, Confetti)").changed() {
+                    self.sync_settings();
+                    self.save_current_settings();
+                }
+                
+                ui.horizontal(|ui| {
+                    ui.label("Reveal Animation Speed:");
+                    if ui.add(egui::Slider::new(&mut self.settings.animation_speed, 0.5..=3.0).text("x")).changed() {
+                        self.sync_settings();
+                        self.save_current_settings();
+                    }
+                });
+            });
+
+            ui.add_space(16.0);
+
+            // --- ACCESSIBILITY & MOTION ---
+            ui.heading("♿ Accessibility");
+            ui.group(|ui| {
+                if ui.checkbox(&mut self.settings.cursor.reduced_motion, "Reduced Motion (Disables Screen Shake & Particle Bursts)").changed() {
+                    self.sync_settings();
+                    self.save_current_settings();
+                }
+            });
+
+            ui.add_space(16.0);
+
+            // --- CUSTOM CURSOR ---
+            ui.heading("🖱 Custom Cursor System");
+            ui.group(|ui| {
+                if ui.checkbox(&mut self.settings.cursor.enabled, "Enable Theme-Aware Custom Cursor").changed() {
+                    self.sync_settings();
+                    self.save_current_settings();
+                }
+                if self.settings.cursor.enabled {
+                    ui.horizontal(|ui| {
+                        ui.label("Cursor Size:");
+                        if ui.add(egui::Slider::new(&mut self.settings.cursor.size, 0.5..=3.0)).changed() {
+                            self.sync_settings();
+                            self.save_current_settings();
+                        }
+                    });
+                    if ui.checkbox(&mut self.settings.cursor.trail, "Cursor Motion Trail").changed() {
+                        self.sync_settings();
+                        self.save_current_settings();
                     }
                 }
-            }
+            });
+
+            ui.add_space(16.0);
+
+            // --- THEME SELECTOR ---
+            ui.heading("🎨 Active Theme");
+            ui.group(|ui| {
+                let preset_names = [
+                    ("soft_circuit", "Soft Circuit"),
+                    ("obsidian", "Slate Minimal"),
+                    ("aurora", "OLED Void"),
+                    ("paper", "Monochrome Paper"),
+                    ("retro", "Classic 95"),
+                    ("neon_arcade", "Cyber Neon"),
+                ];
+                ui.horizontal_wrapped(|ui| {
+                    for (id, name) in preset_names {
+                        let is_selected = self.theme.id == id;
+                        if ui.selectable_label(is_selected, name).clicked() {
+                            if let Some(t) = crate::theme::Theme::get_preset(id) {
+                                self.theme = t;
+                                self.apply_profile_theme();
+                                if let Some(ref prof) = self.active_profile {
+                                    if let Some(ref db) = self.db {
+                                        let _ = db.set_profile_theme(prof.id, id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                if ui.button("🎨 Open Full Theme Studio").clicked() {
+                    self.audio.play(SoundEffect::UiClick);
+                    self.screen = AppScreen::ThemeStudio;
+                }
+            });
+
+            ui.add_space(24.0);
+
+            // --- PERSISTENCE BUTTONS ---
+            ui.horizontal(|ui| {
+                if ui.button(egui::RichText::new("💾 Save Settings to Profile").size(16.0)).clicked() {
+                    self.save_current_settings();
+                    self.audio.play(SoundEffect::UiClick);
+                }
+                if ui.button(egui::RichText::new("↺ Reset to Defaults").size(16.0)).clicked() {
+                    self.settings = crate::settings::UserSettings::default();
+                    self.sync_settings();
+                    self.save_current_settings();
+                    self.audio.play(SoundEffect::UiClick);
+                }
+            });
+            ui.add_space(32.0);
         });
     }
 
@@ -1307,19 +1564,32 @@ fn color_picker(ui: &mut eframe::egui::Ui, color: &mut (u8, u8, u8)) {
 
 impl eframe::App for MineShiftApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let time = ui.input(|i| i.time);
+        let dt = if self.last_frame_time > 0.0 {
+            (time - self.last_frame_time).clamp(0.001, 0.1) as f32
+        } else {
+            0.016
+        };
+        self.last_frame_time = time;
+
+        self.shake.update(dt);
+        self.particles.update(dt);
+        ui.ctx().request_repaint();
+
         self.cursor_state = CustomCursorState::Default;
         if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             if !matches!(self.screen, AppScreen::MainMenu) {
                 if matches!(self.screen, AppScreen::Profiles) && self.active_profile.is_none() {
                     // Force selecting a profile
                 } else {
+                    self.audio.play(SoundEffect::UiClick);
                     self.screen = AppScreen::MainMenu;
                 }
             }
         }
         
         let mut frame_style = egui::Frame::central_panel(ui.style());
-        frame_style.fill = egui::Color32::from_rgb(0xEE, 0xE2, 0xFF); // Lavender background
+        frame_style.fill = self.theme.colors.bg();
         
         egui::CentralPanel::default().frame(frame_style).show(ui, |ui| {
             match self.screen {
@@ -1335,5 +1605,82 @@ impl eframe::App for MineShiftApp {
                 AppScreen::Settings => self.show_settings(ui),
             }
         });
+
+        // 1. Render particle effects layer on top of gameplay
+        let p_painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("particles_layer")));
+        self.particles.render(&p_painter);
+
+        // 2. Render premium custom cursor on highest tooltip layer
+        let cursor_settings = &self.theme.cursor;
+        if cursor_settings.enabled {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+            if let Some(pos) = ui.ctx().input(|i| i.pointer.latest_pos()) {
+                let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("custom_cursor")));
+                
+                let is_clicking = ui.ctx().input(|i| i.pointer.any_down());
+                let base_radius = cursor_settings.size * 8.0;
+                let radius = if is_clicking { base_radius * 0.8 } else { base_radius };
+                
+                let requested_icon = ui.ctx().output(|o| o.cursor_icon);
+                
+                let mut state = self.cursor_state;
+                if state == CustomCursorState::Default {
+                    if requested_icon == egui::CursorIcon::PointingHand {
+                        state = CustomCursorState::UIHover;
+                    } else if requested_icon == egui::CursorIcon::NotAllowed {
+                        state = CustomCursorState::Disabled;
+                    }
+                }
+                
+                if matches!(self.screen, AppScreen::GeneratingNoGuess) {
+                    state = CustomCursorState::Loading;
+                } else if matches!(self.screen, AppScreen::Gameplay) {
+                    if self.board.status == minecore::board::GameStatus::Won {
+                        state = CustomCursorState::Victory;
+                    } else if self.board.status == minecore::board::GameStatus::Lost {
+                        state = CustomCursorState::Defeat;
+                    }
+                }
+
+                // Trail effect
+                if cursor_settings.trail && !cursor_settings.reduced_motion {
+                    if let Some(interact_pos) = ui.ctx().input(|i| i.pointer.interact_pos()) {
+                        let trail_pos = pos - (pos - interact_pos) * 0.5;
+                        painter.circle_filled(trail_pos, radius * 0.6, self.theme.colors.accent().linear_multiply(0.3));
+                    }
+                }
+                
+                let (fill, stroke_col, stroke_width) = match state {
+                    CustomCursorState::Default => (self.theme.colors.accent(), self.theme.colors.border(), 1.5),
+                    CustomCursorState::UIHover => (self.theme.colors.text_primary(), self.theme.colors.accent(), 2.0),
+                    CustomCursorState::BoardHover => (egui::Color32::from_white_alpha(100), self.theme.colors.accent(), 2.0),
+                    CustomCursorState::BoardFlag => (self.theme.colors.danger(), self.theme.colors.border(), 1.5),
+                    CustomCursorState::Disabled => (self.theme.colors.text_muted(), self.theme.colors.border(), 1.0),
+                    CustomCursorState::Loading => (self.theme.colors.accent().linear_multiply(0.5), self.theme.colors.border(), 1.0),
+                    CustomCursorState::Victory => (self.theme.colors.success(), egui::Color32::WHITE, 2.0),
+                    CustomCursorState::Defeat => (self.theme.colors.danger(), egui::Color32::WHITE, 2.0),
+                };
+                
+                painter.circle_filled(pos, radius, fill);
+                painter.circle_stroke(pos, radius + 2.0, egui::Stroke::new(stroke_width, stroke_col));
+                
+                // Inner geometric detail based on state
+                match state {
+                    CustomCursorState::UIHover => {
+                        painter.circle_filled(pos, radius * 0.5, self.theme.colors.bg());
+                    }
+                    CustomCursorState::BoardFlag => {
+                        let rect = egui::Rect::from_center_size(pos, egui::vec2(radius, radius));
+                        painter.rect_filled(rect, 0.0, egui::Color32::WHITE);
+                    }
+                    CustomCursorState::Disabled => {
+                        painter.line_segment([pos - egui::vec2(radius, radius), pos + egui::vec2(radius, radius)], egui::Stroke::new(1.5, stroke_col));
+                    }
+                    _ => {
+                        painter.circle_filled(pos, radius * 0.3, egui::Color32::WHITE);
+                    }
+                }
+            }
+        }
     }
 }

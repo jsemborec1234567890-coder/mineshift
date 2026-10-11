@@ -48,6 +48,12 @@ impl Database {
         Ok(Self { conn })
     }
 
+    pub fn new_in_memory() -> Result<Self> {
+        let mut conn = Connection::open_in_memory()?;
+        Self::apply_migrations(&mut conn)?;
+        Ok(Self { conn })
+    }
+
     fn db_path() -> PathBuf {
         if let Some(proj_dirs) = ProjectDirs::from("com", "Antigravity", "MineShift") {
             proj_dirs.data_dir().join("mineshift.db")
@@ -128,6 +134,16 @@ impl Database {
             )",
             [],
         )?;
+
+        tx.execute(
+            "CREATE TABLE IF NOT EXISTS profile_settings (
+                profile_id INTEGER PRIMARY KEY,
+                settings_json TEXT NOT NULL,
+                FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
         tx.commit()?;
         Ok(())
     }
@@ -377,5 +393,23 @@ impl Database {
         if level >= 10 { let _ = self.unlock_achievement(profile_id, "level_10"); }
         if level >= 50 { let _ = self.unlock_achievement(profile_id, "level_50"); }
         Ok(())
+    }
+
+    pub fn save_profile_settings(&self, profile_id: i64, json: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO profile_settings (profile_id, settings_json) VALUES (?1, ?2)",
+            params![profile_id, json],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_profile_settings(&self, profile_id: i64) -> Result<Option<String>> {
+        let mut stmt = self.conn.prepare("SELECT settings_json FROM profile_settings WHERE profile_id = ?1")?;
+        let mut rows = stmt.query(params![profile_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
     }
 }

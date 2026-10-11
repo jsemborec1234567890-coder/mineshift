@@ -9,28 +9,28 @@ pub fn card_frame(card_bg: egui::Color32, border_color: egui::Color32, corner_ra
         .inner_margin(padding)
 }
 
-/// Renders a horizontal header with a prominent back button, title, and optional badge.
-#[allow(dead_code)]
-pub fn screen_header(
+/// Renders a horizontal header with a prominent, distinct [< Back] button, title, and optional custom right widget.
+pub fn screen_header<R>(
     ui: &mut egui::Ui,
-    back_label: &str,
     title: &str,
-    right_badge: Option<(&str, egui::Color32, egui::Color32)>, // (text, bg, text_color)
     text_color: egui::Color32,
     border_color: egui::Color32,
     card_bg: egui::Color32,
+    right_content: impl FnOnce(&mut egui::Ui) -> R,
 ) -> bool {
     let mut back_clicked = false;
+    ui.add_space(8.0);
     ui.horizontal(|ui| {
         let back_btn = egui::Button::new(
-            egui::RichText::new(format!("← {}", back_label))
-                .size(16.0)
+            egui::RichText::new("< Back")
+                .size(15.0)
+                .strong()
                 .color(text_color)
         )
         .fill(card_bg)
         .stroke(egui::Stroke::new(1.0, border_color))
         .corner_radius(8.0)
-        .min_size(egui::vec2(90.0, 36.0));
+        .min_size(egui::vec2(86.0, 36.0));
 
         if ui.add(back_btn).clicked() {
             back_clicked = true;
@@ -44,19 +44,35 @@ pub fn screen_header(
                 .color(text_color)
         );
 
-        if let Some((badge_text, badge_bg, badge_fg)) = right_badge {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                egui::Frame::new()
-                    .fill(badge_bg)
-                    .corner_radius(16.0)
-                    .inner_margin(egui::vec2(14.0, 6.0))
-                    .show(ui, |ui| {
-                        ui.label(egui::RichText::new(badge_text).size(14.0).strong().color(badge_fg));
-                    });
-            });
-        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            right_content(ui);
+        });
     });
+    ui.add_space(16.0);
     back_clicked
+}
+
+/// Wraps content in a horizontally centered container if available width exceeds max_width.
+pub fn centered_container<R>(
+    ui: &mut egui::Ui,
+    max_width: f32,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let avail_width = ui.available_width();
+    if avail_width > max_width {
+        let margin = (avail_width - max_width) / 2.0;
+        let mut ret = None;
+        ui.horizontal(|ui| {
+            ui.add_space(margin);
+            ui.vertical(|ui| {
+                ui.set_max_width(max_width);
+                ret = Some(add_contents(ui));
+            });
+        });
+        ret.unwrap()
+    } else {
+        add_contents(ui)
+    }
 }
 
 /// Renders a sidebar tab button that fills when active.

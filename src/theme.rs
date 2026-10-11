@@ -110,6 +110,12 @@ impl Theme {
         ]
     }
 
+    pub fn is_dark(&self) -> bool {
+        let (r, g, b) = self.colors.bg;
+        let luminance = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+        luminance < 128.0
+    }
+
     pub fn soft_circuit() -> Self {
         Self {
             id: "soft_circuit".into(),
@@ -123,17 +129,14 @@ impl Theme {
                 covered: (161, 160, 168),
                 revealed: (255, 214, 168),
                 text_primary: (48, 48, 56),
-                text_muted: (161, 160, 168),
+                text_muted: (108, 105, 120),
                 accent: (121, 101, 190),
                 danger: (232, 92, 96),
                 success: (96, 205, 177),
                 button_bg: (200, 195, 215),
                 hover_highlight: (255, 255, 255, 100),
-                border: (200, 200, 210),
+                border: (218, 210, 230),
                 number_colors: vec![(80, 128, 192), (64, 160, 128), (192, 64, 64), (121, 101, 190), (128, 0, 0), (0, 128, 128), (0, 0, 0), (128, 128, 128)],
-
-
-
             },
             cursor: CursorSettings::default(),
             geometry: Geometry {
@@ -225,7 +228,7 @@ impl Theme {
                 covered: (220, 215, 205),
                 revealed: (250, 248, 245),
                 text_primary: (40, 35, 30),
-                text_muted: (150, 140, 130),
+                text_muted: (115, 105, 95),
                 accent: (180, 70, 60),
                 danger: (200, 40, 40),
                 success: (60, 160, 100),
@@ -258,7 +261,7 @@ impl Theme {
                 covered: (192, 192, 192),
                 revealed: (220, 220, 220),
                 text_primary: (0, 0, 0),
-                text_muted: (100, 100, 100),
+                text_muted: (80, 80, 80),
                 accent: (0, 0, 128),
                 danger: (255, 0, 0),
                 success: (0, 128, 0),

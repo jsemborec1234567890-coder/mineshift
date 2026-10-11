@@ -159,4 +159,49 @@ mod tests {
         assert_eq!(loaded_settings.cursor.trail, true);
         assert!((loaded_settings.screen_shake - 1.75).abs() < 1e-4);
     }
+
+    #[test]
+    fn test_theme_luminance_and_is_dark() {
+        let soft_circuit = Theme::soft_circuit();
+        assert!(!soft_circuit.is_dark(), "Soft Circuit must be identified as a light theme");
+
+        let paper = Theme::paper();
+        assert!(!paper.is_dark(), "Paper must be identified as a light theme");
+
+        let obsidian = Theme::obsidian();
+        assert!(obsidian.is_dark(), "Obsidian must be identified as a dark theme");
+
+        let neon_arcade = Theme::neon_arcade();
+        assert!(neon_arcade.is_dark(), "Neon Arcade must be identified as a dark theme");
+
+        let aurora = Theme::aurora();
+        assert!(aurora.is_dark(), "Aurora must be identified as a dark theme");
+
+        let retro = Theme::retro();
+        assert!(!retro.is_dark(), "Retro (Win95 grey 192,192,192) must be identified as a light theme");
+    }
+
+    #[test]
+    fn test_profile_theme_sqlite_persistence() {
+        let db = crate::db::Database::new_in_memory().expect("In memory database");
+        let profile_id = db.create_profile("ThemeTester", "avatar_02").expect("Create profile");
+
+        let initial_profile = db.get_profiles().expect("Profiles").into_iter().find(|p| p.id == profile_id).unwrap();
+        assert_eq!(initial_profile.selected_theme_id, "soft_circuit");
+
+        // Switch to obsidian
+        db.set_profile_theme(profile_id, "obsidian").expect("Set theme to obsidian");
+        let updated_profile = db.get_profiles().expect("Profiles").into_iter().find(|p| p.id == profile_id).unwrap();
+        assert_eq!(updated_profile.selected_theme_id, "obsidian");
+
+        // Switch to neon_arcade
+        db.set_profile_theme(profile_id, "neon_arcade").expect("Set theme to neon_arcade");
+        let updated_profile2 = db.get_profiles().expect("Profiles").into_iter().find(|p| p.id == profile_id).unwrap();
+        assert_eq!(updated_profile2.selected_theme_id, "neon_arcade");
+
+        // Switch to paper
+        db.set_profile_theme(profile_id, "paper").expect("Set theme to paper");
+        let updated_profile3 = db.get_profiles().expect("Profiles").into_iter().find(|p| p.id == profile_id).unwrap();
+        assert_eq!(updated_profile3.selected_theme_id, "paper");
+    }
 }

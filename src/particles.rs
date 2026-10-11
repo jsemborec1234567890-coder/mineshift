@@ -36,7 +36,12 @@ impl ParticleSystem {
         }
     }
 
-    pub fn spawn_explosion(&mut self, center: egui::Pos2, danger_color: egui::Color32, reduced_motion: bool) {
+    pub fn spawn_explosion(
+        &mut self,
+        center: egui::Pos2,
+        danger_color: egui::Color32,
+        reduced_motion: bool,
+    ) {
         if !self.enabled {
             return;
         }
@@ -89,7 +94,12 @@ impl ParticleSystem {
         }
     }
 
-    pub fn spawn_tile_pop(&mut self, center: egui::Pos2, accent_color: egui::Color32, reduced_motion: bool) {
+    pub fn spawn_tile_pop(
+        &mut self,
+        center: egui::Pos2,
+        accent_color: egui::Color32,
+        reduced_motion: bool,
+    ) {
         if !self.enabled {
             return;
         }
@@ -211,12 +221,8 @@ impl ParticleSystem {
             let progress = (p.age / p.lifetime).clamp(0.0, 1.0);
             let alpha = ((1.0 - progress) * 255.0) as u8;
 
-            let draw_color = egui::Color32::from_rgba_unmultiplied(
-                p.color.r(),
-                p.color.g(),
-                p.color.b(),
-                alpha,
-            );
+            let draw_color =
+                egui::Color32::from_rgba_unmultiplied(p.color.r(), p.color.g(), p.color.b(), alpha);
 
             match p.kind {
                 ParticleKind::Shockwave => {

@@ -80,7 +80,7 @@ impl Board {
         let width = radius * 2 + 1;
         let height = radius * 2 + 1;
         let mut cells = vec![Cell::default(); width * height];
-        
+
         let r_isize = radius as isize;
         for y in 0..height {
             for x in 0..width {
@@ -130,34 +130,40 @@ impl Board {
 
         let deltas = match self.geometry {
             Geometry::Square => vec![
-                (-1, -1), (0, -1), (1, -1),
-                (-1,  0),          (1,  0),
-                (-1,  1), (0,  1), (1,  1),
+                (-1, -1),
+                (0, -1),
+                (1, -1),
+                (-1, 0),
+                (1, 0),
+                (-1, 1),
+                (0, 1),
+                (1, 1),
             ],
-            Geometry::Hex => vec![
-                (1, 0), (1, -1), (0, -1),
-                (-1, 0), (-1, 1), (0, 1),
-            ],
+            Geometry::Hex => vec![(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)],
         };
 
-        deltas.into_iter().filter_map(move |(dx, dy)| {
-            let nx = x + dx;
-            let ny = y + dy;
-            if nx >= 0 && nx < w && ny >= 0 && ny < h {
-                let cell = &self.cells[(ny * w + nx) as usize];
-                if cell.active {
-                    return Some((nx as usize, ny as usize));
+        deltas
+            .into_iter()
+            .filter_map(move |(dx, dy)| {
+                let nx = x + dx;
+                let ny = y + dy;
+                if nx >= 0 && nx < w && ny >= 0 && ny < h {
+                    let cell = &self.cells[(ny * w + nx) as usize];
+                    if cell.active {
+                        return Some((nx as usize, ny as usize));
+                    }
                 }
-            }
-            None
-        }).collect()
+                None
+            })
+            .collect()
     }
 
     fn place_mines(&mut self, safe_x: usize, safe_y: usize) {
         use rand::{Rng, SeedableRng};
         let mut mines_placed = 0;
-        
-        let safe_zone: Vec<(usize, usize)> = self.neighbors(safe_x, safe_y)
+
+        let safe_zone: Vec<(usize, usize)> = self
+            .neighbors(safe_x, safe_y)
             .into_iter()
             .chain(std::iter::once((safe_x, safe_y)))
             .collect();
@@ -167,12 +173,12 @@ impl Board {
             while mines_placed < self.mine_count {
                 let x = rng.gen_range(0..self.width);
                 let y = rng.gen_range(0..self.height);
-                
+
                 let idx = self.get_index(x, y);
                 if !self.cells[idx].active || safe_zone.contains(&(x, y)) {
                     continue;
                 }
-                
+
                 if !self.cells[idx].is_mine {
                     self.cells[idx].is_mine = true;
                     mines_placed += 1;
@@ -183,19 +189,19 @@ impl Board {
             while mines_placed < self.mine_count {
                 let x = rng.gen_range(0..self.width);
                 let y = rng.gen_range(0..self.height);
-                
+
                 let idx = self.get_index(x, y);
                 if !self.cells[idx].active || safe_zone.contains(&(x, y)) {
                     continue;
                 }
-                
+
                 if !self.cells[idx].is_mine {
                     self.cells[idx].is_mine = true;
                     mines_placed += 1;
                 }
             }
         }
-        
+
         // Compute adjacent mines
         for y in 0..self.height {
             for x in 0..self.width {
@@ -203,7 +209,7 @@ impl Board {
                 if self.cells[idx].is_mine {
                     continue;
                 }
-                
+
                 let mut count = 0;
                 for (nx, ny) in self.neighbors(x, y) {
                     let n_idx = self.get_index(nx, ny);
@@ -252,7 +258,7 @@ impl Board {
 
         self.check_victory();
     }
-    
+
     pub fn chord(&mut self, x: usize, y: usize) {
         if !matches!(self.status, GameStatus::Playing) {
             return;
@@ -284,22 +290,22 @@ impl Board {
             }
         }
     }
-    
+
     pub fn toggle_flag(&mut self, x: usize, y: usize) {
         if !matches!(self.status, GameStatus::Playing) {
             return;
         }
-        
+
         let idx = self.get_index(x, y);
         match self.cells[idx].state {
             CellState::Covered => {
                 self.cells[idx].state = CellState::Flagged;
                 self.flags_placed += 1;
-            },
+            }
             CellState::Flagged => {
                 self.cells[idx].state = CellState::Covered;
                 self.flags_placed -= 1;
-            },
+            }
             _ => {}
         }
     }
@@ -336,7 +342,7 @@ impl Board {
                 unrevealed_safes += 1;
             }
         }
-        
+
         if unrevealed_safes == 0 {
             self.status = GameStatus::Won;
             self.end_time = Some(std::time::Instant::now());
@@ -367,7 +373,7 @@ mod tests {
         assert!(!cell.is_mine);
         assert_eq!(cell.state, CellState::Revealed);
         assert!(matches!(board.status, GameStatus::Playing));
-        
+
         let mut mine_count = 0;
         for c in &board.cells {
             if c.is_mine {
@@ -384,7 +390,7 @@ mod tests {
         let cell = board.get_cell(1, 1).unwrap();
         assert_eq!(cell.state, CellState::Flagged);
         assert_eq!(board.flags_placed, 1);
-        
+
         board.toggle_flag(1, 1);
         let cell = board.get_cell(1, 1).unwrap();
         assert_eq!(cell.state, CellState::Covered);
@@ -392,43 +398,52 @@ mod tests {
     }
 }
 
-    #[test]
-    fn test_chording() {
-        let mut board = Board::new_square(9, 9, 0); // No random mines
-        board.first_click = false;
-        
-        // Manually place a mine and numbers
-        let idx1 = board.get_index(1, 1);
-        board.cells[idx1].is_mine = true;
-        let idx2 = board.get_index(0, 1);
-        board.cells[idx2].adjacent_mines = 1;
-        
-        // Reveal 0,1
-        board.reveal(0, 1);
-        assert_eq!(board.cells[board.get_index(0, 1)].state, CellState::Revealed);
-        
-        // Try chording before flagging (should do nothing)
-        board.chord(0, 1);
-        assert_eq!(board.cells[board.get_index(0, 0)].state, CellState::Covered);
-        
-        // Flag the mine
-        board.toggle_flag(1, 1);
-        
-        // Chord again (should reveal surrounding safe cells)
-        board.chord(0, 1);
-        assert_eq!(board.cells[board.get_index(0, 0)].state, CellState::Revealed);
-        assert_eq!(board.cells[board.get_index(0, 2)].state, CellState::Revealed);
-    }
+#[test]
+fn test_chording() {
+    let mut board = Board::new_square(9, 9, 0); // No random mines
+    board.first_click = false;
 
-    #[test]
-    fn test_hex_initialization() {
-        let board = Board::new_hex(5, 10);
-        assert_eq!(board.geometry, Geometry::Hex);
-        assert_eq!(board.radius, 5);
-        assert_eq!(board.mine_count, 10);
-        
-        // Hex grid with radius R has 3*R*(R+1) + 1 cells.
-        // For R=5, that is 3*5*6 + 1 = 91 active cells.
-        let active_cells = board.cells.iter().filter(|c| c.active).count();
-        assert_eq!(active_cells, 91);
-    }
+    // Manually place a mine and numbers
+    let idx1 = board.get_index(1, 1);
+    board.cells[idx1].is_mine = true;
+    let idx2 = board.get_index(0, 1);
+    board.cells[idx2].adjacent_mines = 1;
+
+    // Reveal 0,1
+    board.reveal(0, 1);
+    assert_eq!(
+        board.cells[board.get_index(0, 1)].state,
+        CellState::Revealed
+    );
+
+    // Try chording before flagging (should do nothing)
+    board.chord(0, 1);
+    assert_eq!(board.cells[board.get_index(0, 0)].state, CellState::Covered);
+
+    // Flag the mine
+    board.toggle_flag(1, 1);
+
+    // Chord again (should reveal surrounding safe cells)
+    board.chord(0, 1);
+    assert_eq!(
+        board.cells[board.get_index(0, 0)].state,
+        CellState::Revealed
+    );
+    assert_eq!(
+        board.cells[board.get_index(0, 2)].state,
+        CellState::Revealed
+    );
+}
+
+#[test]
+fn test_hex_initialization() {
+    let board = Board::new_hex(5, 10);
+    assert_eq!(board.geometry, Geometry::Hex);
+    assert_eq!(board.radius, 5);
+    assert_eq!(board.mine_count, 10);
+
+    // Hex grid with radius R has 3*R*(R+1) + 1 cells.
+    // For R=5, that is 3*5*6 + 1 = 91 active cells.
+    let active_cells = board.cells.iter().filter(|c| c.active).count();
+    assert_eq!(active_cells, 91);
+}

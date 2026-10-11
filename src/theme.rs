@@ -51,23 +51,59 @@ pub struct Colors {
     pub number_colors: Vec<(u8, u8, u8)>,
 }
 
-
 impl Colors {
-    pub fn bg(&self) -> Color32 { Color32::from_rgb(self.bg.0, self.bg.1, self.bg.2) }
-    pub fn menu_bg(&self) -> Color32 { Color32::from_rgb(self.menu_bg.0, self.menu_bg.1, self.menu_bg.2) }
-    pub fn card_bg(&self) -> Color32 { Color32::from_rgb(self.card_bg.0, self.card_bg.1, self.card_bg.2) }
-    pub fn border(&self) -> Color32 { Color32::from_rgb(self.border.0, self.border.1, self.border.2) }
-    pub fn covered(&self) -> Color32 { Color32::from_rgb(self.covered.0, self.covered.1, self.covered.2) }
-    pub fn revealed(&self) -> Color32 { Color32::from_rgb(self.revealed.0, self.revealed.1, self.revealed.2) }
-    pub fn text_primary(&self) -> Color32 { Color32::from_rgb(self.text_primary.0, self.text_primary.1, self.text_primary.2) }
-    pub fn text_muted(&self) -> Color32 { Color32::from_rgb(self.text_muted.0, self.text_muted.1, self.text_muted.2) }
-    pub fn accent(&self) -> Color32 { Color32::from_rgb(self.accent.0, self.accent.1, self.accent.2) }
-    pub fn danger(&self) -> Color32 { Color32::from_rgb(self.danger.0, self.danger.1, self.danger.2) }
-    pub fn success(&self) -> Color32 { Color32::from_rgb(self.success.0, self.success.1, self.success.2) }
-    pub fn button_bg(&self) -> Color32 { Color32::from_rgb(self.button_bg.0, self.button_bg.1, self.button_bg.2) }
-    pub fn hover(&self) -> Color32 { Color32::from_rgba_unmultiplied(self.hover_highlight.0, self.hover_highlight.1, self.hover_highlight.2, self.hover_highlight.3) }
+    pub fn bg(&self) -> Color32 {
+        Color32::from_rgb(self.bg.0, self.bg.1, self.bg.2)
+    }
+    pub fn menu_bg(&self) -> Color32 {
+        Color32::from_rgb(self.menu_bg.0, self.menu_bg.1, self.menu_bg.2)
+    }
+    pub fn card_bg(&self) -> Color32 {
+        Color32::from_rgb(self.card_bg.0, self.card_bg.1, self.card_bg.2)
+    }
+    pub fn border(&self) -> Color32 {
+        Color32::from_rgb(self.border.0, self.border.1, self.border.2)
+    }
+    pub fn covered(&self) -> Color32 {
+        Color32::from_rgb(self.covered.0, self.covered.1, self.covered.2)
+    }
+    pub fn revealed(&self) -> Color32 {
+        Color32::from_rgb(self.revealed.0, self.revealed.1, self.revealed.2)
+    }
+    pub fn text_primary(&self) -> Color32 {
+        Color32::from_rgb(
+            self.text_primary.0,
+            self.text_primary.1,
+            self.text_primary.2,
+        )
+    }
+    pub fn text_muted(&self) -> Color32 {
+        Color32::from_rgb(self.text_muted.0, self.text_muted.1, self.text_muted.2)
+    }
+    pub fn accent(&self) -> Color32 {
+        Color32::from_rgb(self.accent.0, self.accent.1, self.accent.2)
+    }
+    pub fn danger(&self) -> Color32 {
+        Color32::from_rgb(self.danger.0, self.danger.1, self.danger.2)
+    }
+    pub fn success(&self) -> Color32 {
+        Color32::from_rgb(self.success.0, self.success.1, self.success.2)
+    }
+    pub fn button_bg(&self) -> Color32 {
+        Color32::from_rgb(self.button_bg.0, self.button_bg.1, self.button_bg.2)
+    }
+    pub fn hover(&self) -> Color32 {
+        Color32::from_rgba_unmultiplied(
+            self.hover_highlight.0,
+            self.hover_highlight.1,
+            self.hover_highlight.2,
+            self.hover_highlight.3,
+        )
+    }
     pub fn number_color(&self, mines: usize) -> Color32 {
-        if mines == 0 { return self.text_primary(); }
+        if mines == 0 {
+            return self.text_primary();
+        }
         let idx = (mines - 1).min(self.number_colors.len().saturating_sub(1));
         if idx < self.number_colors.len() {
             let c = self.number_colors[idx];
@@ -96,7 +132,7 @@ impl Theme {
             "paper" => Some(Self::paper()),
             "retro" => Some(Self::retro()),
             "neon_arcade" => Some(Self::neon_arcade()),
-            _ => None
+            _ => None,
         }
     }
     pub fn presets() -> Vec<Self> {
@@ -136,7 +172,16 @@ impl Theme {
                 button_bg: (200, 195, 215),
                 hover_highlight: (255, 255, 255, 100),
                 border: (218, 210, 230),
-                number_colors: vec![(80, 128, 192), (64, 160, 128), (192, 64, 64), (121, 101, 190), (128, 0, 0), (0, 128, 128), (0, 0, 0), (128, 128, 128)],
+                number_colors: vec![
+                    (80, 128, 192),
+                    (64, 160, 128),
+                    (192, 64, 64),
+                    (121, 101, 190),
+                    (128, 0, 0),
+                    (0, 128, 128),
+                    (0, 0, 0),
+                    (128, 128, 128),
+                ],
             },
             cursor: CursorSettings::default(),
             geometry: Geometry {
@@ -169,7 +214,16 @@ impl Theme {
                 button_bg: (40, 40, 45),
                 hover_highlight: (200, 180, 255, 60),
                 border: (60, 60, 70),
-                number_colors: vec![(80, 128, 192), (64, 160, 128), (192, 64, 64), (121, 101, 190), (128, 0, 0), (0, 128, 128), (0, 0, 0), (128, 128, 128)],
+                number_colors: vec![
+                    (80, 128, 192),
+                    (64, 160, 128),
+                    (192, 64, 64),
+                    (121, 101, 190),
+                    (128, 0, 0),
+                    (0, 128, 128),
+                    (0, 0, 0),
+                    (128, 128, 128),
+                ],
             },
             cursor: CursorSettings::default(),
             geometry: Geometry {
@@ -202,7 +256,16 @@ impl Theme {
                 button_bg: (40, 90, 120),
                 hover_highlight: (150, 240, 255, 90),
                 border: (45, 85, 120),
-                number_colors: vec![(80, 128, 192), (64, 160, 128), (192, 64, 64), (121, 101, 190), (128, 0, 0), (0, 128, 128), (0, 0, 0), (128, 128, 128)],
+                number_colors: vec![
+                    (80, 128, 192),
+                    (64, 160, 128),
+                    (192, 64, 64),
+                    (121, 101, 190),
+                    (128, 0, 0),
+                    (0, 128, 128),
+                    (0, 0, 0),
+                    (128, 128, 128),
+                ],
             },
             cursor: CursorSettings::default(),
             geometry: Geometry {
@@ -235,7 +298,16 @@ impl Theme {
                 button_bg: (230, 225, 215),
                 hover_highlight: (0, 0, 0, 20),
                 border: (215, 210, 200),
-                number_colors: vec![(80, 128, 192), (64, 160, 128), (192, 64, 64), (121, 101, 190), (128, 0, 0), (0, 128, 128), (0, 0, 0), (128, 128, 128)],
+                number_colors: vec![
+                    (80, 128, 192),
+                    (64, 160, 128),
+                    (192, 64, 64),
+                    (121, 101, 190),
+                    (128, 0, 0),
+                    (0, 128, 128),
+                    (0, 0, 0),
+                    (128, 128, 128),
+                ],
             },
             cursor: CursorSettings::default(),
             geometry: Geometry {
@@ -268,7 +340,16 @@ impl Theme {
                 button_bg: (192, 192, 192),
                 hover_highlight: (255, 255, 255, 120),
                 border: (128, 128, 128),
-                number_colors: vec![(80, 128, 192), (64, 160, 128), (192, 64, 64), (121, 101, 190), (128, 0, 0), (0, 128, 128), (0, 0, 0), (128, 128, 128)],
+                number_colors: vec![
+                    (80, 128, 192),
+                    (64, 160, 128),
+                    (192, 64, 64),
+                    (121, 101, 190),
+                    (128, 0, 0),
+                    (0, 128, 128),
+                    (0, 0, 0),
+                    (128, 128, 128),
+                ],
             },
             cursor: CursorSettings::default(),
             geometry: Geometry {
@@ -301,7 +382,16 @@ impl Theme {
                 button_bg: (60, 20, 80),
                 hover_highlight: (255, 100, 255, 150),
                 border: (80, 20, 110),
-                number_colors: vec![(80, 128, 192), (64, 160, 128), (192, 64, 64), (121, 101, 190), (128, 0, 0), (0, 128, 128), (0, 0, 0), (128, 128, 128)],
+                number_colors: vec![
+                    (80, 128, 192),
+                    (64, 160, 128),
+                    (192, 64, 64),
+                    (121, 101, 190),
+                    (128, 0, 0),
+                    (0, 128, 128),
+                    (0, 0, 0),
+                    (128, 128, 128),
+                ],
             },
             cursor: CursorSettings::default(),
             geometry: Geometry {

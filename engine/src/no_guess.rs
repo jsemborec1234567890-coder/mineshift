@@ -1,10 +1,10 @@
 use crate::board::{Board, CellState};
-use crate::solver::{Solver, Deduction};
+use crate::solver::{Deduction, Solver};
 use rand::Rng;
 
 pub fn generate_no_guess_board(mut board: Board, safe_x: usize, safe_y: usize) -> Option<Board> {
     let max_retries = 100;
-    
+
     for _ in 0..max_retries {
         // Reset board
         for cell in &mut board.cells {
@@ -13,7 +13,7 @@ pub fn generate_no_guess_board(mut board: Board, safe_x: usize, safe_y: usize) -
             cell.adjacent_mines = 0;
         }
         board.first_click = true;
-        
+
         // Place mines and calculate numbers
         // board.place_mines is private, so we need a public function or do it here.
         // Actually, Board::new_* doesn't place mines until first click.
@@ -23,16 +23,16 @@ pub fn generate_no_guess_board(mut board: Board, safe_x: usize, safe_y: usize) -
             board.seed = Some(s.wrapping_add(1));
         }
         board.reveal(safe_x, safe_y);
-        
+
         // Verify no-guess
         let mut sim_board = board.clone();
-        
+
         loop {
             let deductions = Solver::deduce(&sim_board);
             if deductions.is_empty() {
                 break;
             }
-            
+
             for d in deductions {
                 match d {
                     Deduction::Safe(x, y) => {
@@ -46,7 +46,7 @@ pub fn generate_no_guess_board(mut board: Board, safe_x: usize, safe_y: usize) -
                 }
             }
         }
-        
+
         // Check if all non-mine cells are revealed
         let mut all_safe_revealed = true;
         for cell in &sim_board.cells {
@@ -55,15 +55,15 @@ pub fn generate_no_guess_board(mut board: Board, safe_x: usize, safe_y: usize) -
                 break;
             }
         }
-        
+
         if all_safe_revealed {
             // Restore covered state for the initial board (except safe_x, safe_y maybe? No, reveal starts the game)
             return Some(board);
         }
-        
+
         // Reset state for next try
         board.status = crate::board::GameStatus::Playing;
     }
-    
+
     None
 }

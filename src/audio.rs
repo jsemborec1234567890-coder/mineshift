@@ -1,6 +1,6 @@
-use std::io::Cursor;
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use rand::Rng;
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
+use std::io::Cursor;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SoundEffect {
@@ -29,7 +29,10 @@ impl SoundManager {
         let (stream, stream_handle) = match OutputStream::try_default() {
             Ok((s, h)) => (Some(s), Some(h)),
             Err(e) => {
-                eprintln!("[Audio] Warning: Could not initialize audio output: {}. Running in silent mode.", e);
+                eprintln!(
+                    "[Audio] Warning: Could not initialize audio output: {}. Running in silent mode.",
+                    e
+                );
                 (None, None)
             }
         };
@@ -89,7 +92,11 @@ fn generate_procedural_wav(effect: SoundEffect, pitch_var: bool) -> Vec<u8> {
                     let env = (1.0 - t / duration).powf(3.0);
                     let freq = 1800.0 * pitch_factor;
                     let tone = (t * freq * std::f32::consts::TAU).sin();
-                    let click = if i < 15 { rng.gen_range(-1.0..1.0) } else { 0.0 };
+                    let click = if i < 15 {
+                        rng.gen_range(-1.0..1.0)
+                    } else {
+                        0.0
+                    };
                     let sample = (tone * 0.7 + click * 0.3) * env;
                     (sample * 16000.0) as i16
                 })
@@ -99,13 +106,13 @@ fn generate_procedural_wav(effect: SoundEffect, pitch_var: bool) -> Vec<u8> {
             // Melodic cascade pop with pitch scaled by number
             let base_freq = match num {
                 0 => 440.0,
-                1 => 523.25, // C5
-                2 => 587.33, // D5
-                3 => 659.25, // E5
-                4 => 698.46, // F5
-                5 => 783.99, // G5
-                6 => 880.00, // A5
-                7 => 987.77, // B5
+                1 => 523.25,  // C5
+                2 => 587.33,  // D5
+                3 => 659.25,  // E5
+                4 => 698.46,  // F5
+                5 => 783.99,  // G5
+                6 => 880.00,  // A5
+                7 => 987.77,  // B5
                 _ => 1046.50, // C6
             } * pitch_factor;
 
@@ -134,7 +141,11 @@ fn generate_procedural_wav(effect: SoundEffect, pitch_var: bool) -> Vec<u8> {
                     let freq = 1200.0 * pitch_factor;
                     let tone = (t * freq * std::f32::consts::TAU).sin();
                     let ping = (t * 2800.0 * std::f32::consts::TAU).sin() * 0.4;
-                    let noise = if i < 30 { rng.gen_range(-0.75..0.75) } else { 0.0 };
+                    let noise = if i < 30 {
+                        rng.gen_range(-0.75..0.75)
+                    } else {
+                        0.0
+                    };
                     let sample = (tone + ping + noise) * env * 0.7;
                     (sample * 20000.0) as i16
                 })
@@ -150,7 +161,11 @@ fn generate_procedural_wav(effect: SoundEffect, pitch_var: bool) -> Vec<u8> {
                     let env = (1.0 - t / duration).powf(3.0);
                     let freq = 850.0 * pitch_factor;
                     let tone = (t * freq * std::f32::consts::TAU).sin();
-                    let noise = if i < 20 { rng.gen_range(-0.5..0.5) } else { 0.0 };
+                    let noise = if i < 20 {
+                        rng.gen_range(-0.5..0.5)
+                    } else {
+                        0.0
+                    };
                     let sample = (tone + noise) * env * 0.6;
                     (sample * 17000.0) as i16
                 })
@@ -211,7 +226,8 @@ fn generate_procedural_wav(effect: SoundEffect, pitch_var: bool) -> Vec<u8> {
                             if note_t < dur {
                                 let env = (1.0 - note_t / dur).powf(1.5);
                                 let tone = (note_t * freq * std::f32::consts::TAU).sin();
-                                let harm = (note_t * freq * 2.0 * std::f32::consts::TAU).sin() * 0.3;
+                                let harm =
+                                    (note_t * freq * 2.0 * std::f32::consts::TAU).sin() * 0.3;
                                 sum += (tone + harm) * env * 0.4;
                             }
                         }
@@ -253,12 +269,12 @@ fn write_wav_buffer(sample_rate: u32, samples: &[i16]) -> Vec<u8> {
     // "fmt " sub-chunk
     buf.extend_from_slice(b"fmt ");
     buf.extend_from_slice(&16u32.to_le_bytes()); // subchunk1 size (16 for PCM)
-    buf.extend_from_slice(&1u16.to_le_bytes());  // Audio format 1 = PCM
-    buf.extend_from_slice(&1u16.to_le_bytes());  // NumChannels 1 = Mono
+    buf.extend_from_slice(&1u16.to_le_bytes()); // Audio format 1 = PCM
+    buf.extend_from_slice(&1u16.to_le_bytes()); // NumChannels 1 = Mono
     buf.extend_from_slice(&sample_rate.to_le_bytes());
     let byte_rate = sample_rate * 2; // sample_rate * num_channels * bits_per_sample / 8
     buf.extend_from_slice(&byte_rate.to_le_bytes());
-    buf.extend_from_slice(&2u16.to_le_bytes());  // BlockAlign = num_channels * bits_per_sample / 8
+    buf.extend_from_slice(&2u16.to_le_bytes()); // BlockAlign = num_channels * bits_per_sample / 8
     buf.extend_from_slice(&16u16.to_le_bytes()); // BitsPerSample = 16
 
     // "data" sub-chunk

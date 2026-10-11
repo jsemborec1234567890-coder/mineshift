@@ -4,29 +4,63 @@ mod db;
 mod juice;
 mod particles;
 pub mod settings;
-pub mod theme;
-mod ui_tokens;
 #[cfg(test)]
 mod settings_tests;
+pub mod theme;
+mod ui_tokens;
 
 use audio::SoundEffect;
 
-use minecore::board::{Board, GameStatus, CellState};
-use minecore::mode;
 use eframe::egui;
+use minecore::board::{Board, CellState, GameStatus};
+use minecore::mode;
+
+fn configure_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(bytes) = std::fs::read("C:\\Windows\\Fonts\\segoeui.ttf") {
+            fonts.font_data.insert(
+                "segoe_ui".to_owned(),
+                std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+            );
+            if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                prop.insert(0, "segoe_ui".to_owned());
+            }
+        }
+        if let Ok(bytes) = std::fs::read("C:\\Windows\\Fonts\\seguisym.ttf") {
+            fonts.font_data.insert(
+                "segoe_ui_symbol".to_owned(),
+                std::sync::Arc::new(egui::FontData::from_owned(bytes)),
+            );
+            if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                prop.push("segoe_ui_symbol".to_owned());
+            }
+        }
+    }
+
+    ctx.set_fonts(fonts);
+}
 
 fn main() -> Result<(), eframe::Error> {
+    let args: Vec<String> = std::env::args().collect();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 700.0])
             .with_min_inner_size([800.0, 600.0]),
         ..Default::default()
     };
-    
+
     eframe::run_native(
         "MINE//SHIFT",
         options,
-        Box::new(|_cc| Ok(Box::new(MineShiftApp::new()))),
+        Box::new(move |cc| {
+            configure_fonts(&cc.egui_ctx);
+            let mut app = MineShiftApp::new();
+            app.apply_cli_args(&args);
+            Ok(Box::new(app))
+        }),
     )
 }
 
@@ -111,6 +145,8 @@ struct MineShiftApp {
     shake: crate::juice::TraumaShake,
     anim_tracker: crate::juice::CellAnimationTracker,
     last_frame_time: f64,
+    screenshot_target: Option<String>,
+    frame_counter: u32,
 }
 
 impl MineShiftApp {
@@ -120,7 +156,11 @@ impl MineShiftApp {
         self.audio.muted = self.settings.mute_audio;
         self.audio.pitch_variation = self.settings.pitch_variation;
         self.particles.enabled = self.settings.particles_enabled;
-        self.shake.intensity = if self.settings.cursor.reduced_motion { 0.0 } else { self.settings.screen_shake };
+        self.shake.intensity = if self.settings.cursor.reduced_motion {
+            0.0
+        } else {
+            self.settings.screen_shake
+        };
         self.theme.cursor = self.settings.cursor.clone();
         self.theme.geometry.animation_speed = self.settings.animation_speed;
     }
@@ -170,7 +210,10 @@ impl MineShiftApp {
                 self.theme = theme;
             } else if let Some(ref db) = self.db {
                 if let Ok(customs) = db.get_custom_themes(prof.id) {
-                    if let Some((_, _, data)) = customs.into_iter().find(|(id, _, _)| id == &prof.selected_theme_id) {
+                    if let Some((_, _, data)) = customs
+                        .into_iter()
+                        .find(|(id, _, _)| id == &prof.selected_theme_id)
+                    {
                         if let Ok(mut t) = serde_json::from_str::<crate::theme::Theme>(&data) {
                             t.is_custom = true;
                             self.theme = t;
@@ -187,7 +230,7 @@ impl MineShiftApp {
         let db = db::Database::new().ok();
         let mut profiles = Vec::new();
         let mut active_profile = None;
-        
+
         if let Some(ref d) = db {
             if let Ok(profs) = d.get_profiles() {
                 if !profs.is_empty() {
@@ -196,8 +239,12 @@ impl MineShiftApp {
                 profiles = profs;
             }
         }
-        
-        let screen = if active_profile.is_some() { AppScreen::MainMenu } else { AppScreen::Profiles };
+
+        let screen = if active_profile.is_some() {
+            AppScreen::MainMenu
+        } else {
+            AppScreen::Profiles
+        };
 
         let mut app = Self {
             screen,
@@ -222,12 +269,93 @@ impl MineShiftApp {
             shake: crate::juice::TraumaShake::new(),
             anim_tracker: crate::juice::CellAnimationTracker::new(),
             last_frame_time: 0.0,
+            screenshot_target: None,
+            frame_counter: 0,
         };
         app.load_profile_settings();
         app.apply_profile_theme();
         app
     }
-    
+
+    pub fn apply_cli_args(&mut self, args: &[String]) {
+        let mut i = 1;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--screen" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        match args[i].as_str() {
+                            "settings-cursor" => {
+                                self.screen = AppScreen::Settings;
+                                self.settings_tab = SettingsTab::Cursor;
+                            }
+                            "settings-gamefeel" => {
+                                self.screen = AppScreen::Settings;
+                                self.settings_tab = SettingsTab::GameFeel;
+                            }
+                            "settings-audio" => {
+                                self.screen = AppScreen::Settings;
+                                self.settings_tab = SettingsTab::Audio;
+                            }
+                            "settings-general" => {
+                                self.screen = AppScreen::Settings;
+                                self.settings_tab = SettingsTab::General;
+                            }
+                            "settings-appearance" => {
+                                self.screen = AppScreen::Settings;
+                                self.settings_tab = SettingsTab::Appearance;
+                            }
+                            "settings-accessibility" => {
+                                self.screen = AppScreen::Settings;
+                                self.settings_tab = SettingsTab::Accessibility;
+                            }
+                            "statistics" => {
+                                self.screen = AppScreen::Statistics;
+                            }
+                            "achievements" => {
+                                self.screen = AppScreen::Achievements;
+                            }
+                            "mainmenu" | "main-menu" => {
+                                self.screen = AppScreen::MainMenu;
+                            }
+                            "gameplay-square" => {
+                                self.screen = AppScreen::Gameplay;
+                                self.board = Board::new_square(9, 9, 10);
+                            }
+                            "gameplay-hex" => {
+                                self.screen = AppScreen::Gameplay;
+                                self.board = Board::new_hex(5, 10);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                "--theme" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        self.set_active_theme(&args[i]);
+                    }
+                }
+                "--saved-feedback" => {
+                    self.settings_saved_feedback = Some(1e9);
+                }
+                "--trigger-shake" => {
+                    self.settings.screen_shake = 1.0;
+                    self.shake.intensity = 1.0;
+                    self.shake.add_trauma(0.85);
+                }
+                "--screenshot" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        self.screenshot_target = Some(args[i].clone());
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
     fn show_main_menu(&mut self, ui: &mut egui::Ui) {
         let time = ui.input(|i| i.time);
         ui.ctx().request_repaint();
@@ -237,76 +365,84 @@ impl MineShiftApp {
         let text_primary = self.theme.colors.text_primary();
         let accent = self.theme.colors.accent();
         let danger = self.theme.colors.danger();
-        
+
         let painter = ui.painter();
         let rect = ui.max_rect();
         let center = rect.center();
         for i in 0..6 {
             let radius = 150.0 + i as f32 * 100.0;
             let angle = time as f32 * (0.05 + i as f32 * 0.02);
-            
+
             let mut points = vec![];
             for j in 0..6 {
                 let a = angle + (j as f32 * 60.0).to_radians();
                 points.push(center + egui::vec2(a.cos() * radius, a.sin() * radius));
             }
-            
+
             painter.add(egui::Shape::closed_line(
                 points,
-                egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 35))
+                egui::Stroke::new(
+                    1.5,
+                    egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 35),
+                ),
             ));
         }
 
         ui.vertical_centered(|ui| {
             ui.add_space(ui.available_height() * 0.12);
-            
+
             ui.label(
                 egui::RichText::new("MINE//SHIFT")
                     .size(80.0)
                     .strong()
                     .extra_letter_spacing(4.0)
-                    .color(text_primary)
+                    .color(text_primary),
             );
-            
+
             ui.add_space(48.0);
-            
+
             let play_btn = egui::Button::new(
-                egui::RichText::new("PLAY").size(20.0).strong().color(egui::Color32::WHITE)
+                egui::RichText::new("PLAY")
+                    .size(20.0)
+                    .strong()
+                    .color(egui::Color32::WHITE),
             )
             .fill(accent)
             .corner_radius(10.0)
             .min_size(egui::vec2(400.0, 54.0));
-            
+
             if ui.add(play_btn).clicked() {
                 self.audio.play(SoundEffect::UiClick);
                 self.screen = AppScreen::GameModes;
             }
-            
+
             ui.add_space(12.0);
-            
+
             let customize_btn = egui::Button::new(
-                egui::RichText::new("CUSTOMIZE").size(20.0).strong().color(accent)
+                egui::RichText::new("CUSTOMIZE")
+                    .size(20.0)
+                    .strong()
+                    .color(accent),
             )
             .fill(card_bg)
             .stroke(egui::Stroke::new(1.5, accent))
             .corner_radius(10.0)
             .min_size(egui::vec2(400.0, 54.0));
-            
+
             if ui.add(customize_btn).clicked() {
                 self.audio.play(SoundEffect::UiClick);
                 self.screen = AppScreen::ThemeStudio;
             }
-            
+
             ui.add_space(12.0);
-            
+
             let menu_btn = |ui: &mut egui::Ui, text: &str, color: egui::Color32| {
-                let btn = egui::Button::new(
-                    egui::RichText::new(text).size(18.0).strong().color(color)
-                )
-                .fill(card_bg)
-                .stroke(egui::Stroke::new(1.0, border))
-                .corner_radius(10.0)
-                .min_size(egui::vec2(400.0, 48.0));
+                let btn =
+                    egui::Button::new(egui::RichText::new(text).size(18.0).strong().color(color))
+                        .fill(card_bg)
+                        .stroke(egui::Stroke::new(1.0, border))
+                        .corner_radius(10.0)
+                        .min_size(egui::vec2(400.0, 48.0));
                 ui.add(btn).clicked()
             };
 
@@ -342,7 +478,7 @@ impl MineShiftApp {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
-        
+
         // Show Active Profile Info at Top Right
         if let Some(ref profile) = self.active_profile {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
@@ -356,9 +492,18 @@ impl MineShiftApp {
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new(&profile.avatar_id).size(22.0));
                             ui.add_space(8.0);
-                            ui.label(egui::RichText::new(&profile.display_name).size(18.0).strong().color(text_primary));
+                            ui.label(
+                                egui::RichText::new(&profile.display_name)
+                                    .size(18.0)
+                                    .strong()
+                                    .color(text_primary),
+                            );
                             ui.add_space(8.0);
-                            ui.label(egui::RichText::new(format!("Lvl {}", profile.current_level)).size(16.0).color(accent));
+                            ui.label(
+                                egui::RichText::new(format!("Lvl {}", profile.current_level))
+                                    .size(16.0)
+                                    .color(accent),
+                            );
                         });
                     });
             });
@@ -380,7 +525,7 @@ impl MineShiftApp {
                     egui::RichText::new("< Menu")
                         .size(16.0)
                         .strong()
-                        .color(text_primary)
+                        .color(text_primary),
                 )
                 .fill(card_bg)
                 .stroke(egui::Stroke::new(1.0, border))
@@ -395,10 +540,12 @@ impl MineShiftApp {
                 ui.add_space(12.0);
 
                 let mode_text = match self.board.geometry {
-                    minecore::board::Geometry::Square => format!("SQUARE {}×{}", self.board.width, self.board.height),
+                    minecore::board::Geometry::Square => {
+                        format!("SQUARE {}×{}", self.board.width, self.board.height)
+                    }
                     minecore::board::Geometry::Hex => format!("HEXAGON R{}", self.board.radius),
                 };
-                
+
                 // Mode Pill Badge
                 egui::Frame::new()
                     .fill(card_bg)
@@ -406,7 +553,12 @@ impl MineShiftApp {
                     .stroke(egui::Stroke::new(1.0, border))
                     .inner_margin(egui::vec2(10.0, 6.0))
                     .show(ui, |ui| {
-                        ui.label(egui::RichText::new(mode_text).size(13.0).strong().color(text_muted));
+                        ui.label(
+                            egui::RichText::new(mode_text)
+                                .size(13.0)
+                                .strong()
+                                .color(text_muted),
+                        );
                     });
 
                 ui.add_space(16.0);
@@ -414,10 +566,16 @@ impl MineShiftApp {
                 let elapsed = if let Some(end) = self.board.end_time {
                     if let Some(start) = self.board.start_time {
                         end.duration_since(start).as_secs_f64()
-                    } else { 0.0 }
+                    } else {
+                        0.0
+                    }
                 } else if let Some(start) = self.board.start_time {
-                    std::time::Instant::now().duration_since(start).as_secs_f64()
-                } else { 0.0 };
+                    std::time::Instant::now()
+                        .duration_since(start)
+                        .as_secs_f64()
+                } else {
+                    0.0
+                };
 
                 let time_display = if let Some(limit) = self.mode_state.time_limit_sec {
                     let remaining = (limit - elapsed).max(0.0);
@@ -430,22 +588,48 @@ impl MineShiftApp {
                     format!("⏱ {:03.0}", elapsed)
                 };
 
-                ui.label(egui::RichText::new(time_display).size(22.0).strong().color(text_primary));
+                ui.label(
+                    egui::RichText::new(time_display)
+                        .size(22.0)
+                        .strong()
+                        .color(text_primary),
+                );
 
                 ui.add_space(16.0);
 
-                if matches!(self.mode_state.id, mode::GameModeId::Blitz | mode::GameModeId::Sandbox) {
-                    ui.label(egui::RichText::new(format!("⭐ {}", self.mode_state.score)).size(22.0).strong().color(accent));
+                if matches!(
+                    self.mode_state.id,
+                    mode::GameModeId::Blitz | mode::GameModeId::Sandbox
+                ) {
+                    ui.label(
+                        egui::RichText::new(format!("⭐ {}", self.mode_state.score))
+                            .size(22.0)
+                            .strong()
+                            .color(accent),
+                    );
                     ui.add_space(16.0);
                 }
 
-                if matches!(self.mode_state.id, mode::GameModeId::Survival | mode::GameModeId::Expedition) {
-                    ui.label(egui::RichText::new(format!("❤️ {}", self.mode_state.lives)).size(22.0).strong().color(danger));
+                if matches!(
+                    self.mode_state.id,
+                    mode::GameModeId::Survival | mode::GameModeId::Expedition
+                ) {
+                    ui.label(
+                        egui::RichText::new(format!("❤️ {}", self.mode_state.lives))
+                            .size(22.0)
+                            .strong()
+                            .color(danger),
+                    );
                     ui.add_space(16.0);
                 }
 
                 let mines_left = self.board.mine_count as isize - self.board.flags_placed as isize;
-                ui.label(egui::RichText::new(format!("🚩 {}", mines_left)).size(22.0).strong().color(danger));
+                ui.label(
+                    egui::RichText::new(format!("🚩 {}", mines_left))
+                        .size(22.0)
+                        .strong()
+                        .color(danger),
+                );
 
                 ui.add_space(16.0);
 
@@ -458,10 +642,19 @@ impl MineShiftApp {
                 egui::Frame::new()
                     .fill(status_bg)
                     .corner_radius(6.0)
-                    .stroke(if self.board.status == GameStatus::Playing { egui::Stroke::new(1.0, border) } else { egui::Stroke::NONE })
+                    .stroke(if self.board.status == GameStatus::Playing {
+                        egui::Stroke::new(1.0, border)
+                    } else {
+                        egui::Stroke::NONE
+                    })
                     .inner_margin(egui::vec2(12.0, 6.0))
                     .show(ui, |ui| {
-                        ui.label(egui::RichText::new(status_label).size(14.0).strong().color(status_color));
+                        ui.label(
+                            egui::RichText::new(status_label)
+                                .size(14.0)
+                                .strong()
+                                .color(status_color),
+                        );
                     });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -469,7 +662,7 @@ impl MineShiftApp {
                         egui::RichText::new("↻ Restart")
                             .size(15.0)
                             .strong()
-                            .color(text_primary)
+                            .color(text_primary),
                     )
                     .fill(card_bg)
                     .stroke(egui::Stroke::new(1.0, border))
@@ -480,17 +673,23 @@ impl MineShiftApp {
                         self.audio.play(SoundEffect::UiClick);
                         self.anim_tracker.clear();
                         self.board = match self.board.geometry {
-                            minecore::board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
-                            minecore::board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
+                            minecore::board::Geometry::Square => Board::new_square(
+                                self.board.width,
+                                self.board.height,
+                                self.board.mine_count,
+                            ),
+                            minecore::board::Geometry::Hex => {
+                                Board::new_hex(self.board.radius, self.board.mine_count)
+                            }
                         };
                         self.board.is_no_guess = self.mode_state.id == mode::GameModeId::NoGuess;
                     }
 
-                    if self.mode_state.id == mode::GameModeId::Zen && self.board.status == GameStatus::Playing {
+                    if self.mode_state.id == mode::GameModeId::Zen
+                        && self.board.status == GameStatus::Playing
+                    {
                         let hint_btn = egui::Button::new(
-                            egui::RichText::new("💡 Hint")
-                                .size(15.0)
-                                .color(accent)
+                            egui::RichText::new("💡 Hint").size(15.0).color(accent),
                         )
                         .fill(card_bg)
                         .stroke(egui::Stroke::new(1.0, border))
@@ -522,366 +721,547 @@ impl MineShiftApp {
     fn show_gameplay(&mut self, ui: &mut egui::Ui) {
         self.show_gameplay_header(ui);
         ui.add_space(20.0);
-            
-            ui.vertical_centered(|ui| {
-                let avail = ui.available_size();
-                let base_cell_size = 32.0;
-                let base_spacing = 2.0;
-                
-                let raw_w = match self.board.geometry {
-                    minecore::board::Geometry::Square => (base_cell_size + base_spacing) * self.board.width as f32,
-                    minecore::board::Geometry::Hex => (base_cell_size * 3.0_f32.sqrt() + base_spacing) * self.board.width as f32,
-                };
-                let raw_h = match self.board.geometry {
-                    minecore::board::Geometry::Square => (base_cell_size + base_spacing) * self.board.height as f32,
-                    minecore::board::Geometry::Hex => (base_cell_size * 1.5 + base_spacing) * self.board.height as f32,
-                };
-                
-                let scale = (avail.x / raw_w).min(avail.y / raw_h).min(1.5);
-                let cell_size = base_cell_size * scale;
-                let spacing = base_spacing * scale;
-                
-                let board_w = raw_w * scale;
-                let board_h = raw_h * scale;
-                
-                let (rect, response) = ui.allocate_exact_size(
-                        egui::vec2(board_w, board_h),
-                        egui::Sense::click(),
-                    );
-                    
-                    let pointer_pos = ui.input(|i| i.pointer.hover_pos());
-                    let mut clicked_cell: Option<((usize, usize), egui::Pos2)> = None;
-                    let mut secondary_clicked_cell: Option<((usize, usize), egui::Pos2)> = None;
-                    let mut middle_clicked_cell: Option<((usize, usize), egui::Pos2)> = None;
-                    let mut hovered_cell = None;
-                    
-                    // Find hovered cell using accurate center calculation for both Square and Hexagon geometries
-                    let mut closest_dist = f32::MAX;
-                    
-                    for y in 0..self.board.height {
-                        for x in 0..self.board.width {
-                            let cell = self.board.get_cell(x, y);
-                            if cell.is_none() { continue; }
-                            let cell = cell.unwrap();
-                            if !cell.active { continue; }
-                            
-                            let time = ui.input(|i| i.time);
-                            let shake_offset = self.shake.get_offset(time);
-                            let center = coords::compute_cell_screen_center(
-                                self.board.geometry,
-                                x,
-                                y,
-                                self.board.radius,
-                                cell_size,
-                                spacing,
-                                rect.min,
-                                board_w,
-                                board_h,
-                                shake_offset,
-                            );
-                            let bounce = self.anim_tracker.get_bounce_scale(x, y, time, self.settings.animation_speed);
-                            let draw_cell_size = cell_size * bounce;
-                            
-                            if let Some(pos) = pointer_pos {
-                                let dist = (pos - center).length();
-                                if dist < cell_size / 2.0 && dist < closest_dist {
-                                    closest_dist = dist;
-                                    hovered_cell = Some((x, y));
-                                    if cell.state == minecore::board::CellState::Flagged {
-                                        self.cursor_state = CustomCursorState::BoardFlag;
-                                    } else if cell.state == minecore::board::CellState::Covered {
-                                        self.cursor_state = CustomCursorState::BoardHover;
-                                    } else {
-                                        self.cursor_state = CustomCursorState::Default;
-                                    }
-                                    if response.clicked() { clicked_cell = Some(((x, y), center)); }
-                                    if response.secondary_clicked() { secondary_clicked_cell = Some(((x, y), center)); }
-                                    if response.middle_clicked() { middle_clicked_cell = Some(((x, y), center)); }
-                                }
-                            }
-                            
-                            let is_hovered = hovered_cell == Some((x, y));
-                            let hover_t = ui.ctx().animate_bool(egui::Id::new(("hover", x, y)), is_hovered);
-                            let reveal_t = ui.ctx().animate_bool(egui::Id::new(("reveal", x, y)), cell.state == CellState::Revealed);
-                            
-                            let covered_base = self.theme.colors.covered();
-                            let covered_hov = self.theme.colors.button_bg();
-                            let covered_col = lerp_color(covered_base, covered_hov, hover_t);
-                            
-                            let revealed_base = if cell.is_mine {
-                                self.theme.colors.danger()
-                            } else {
-                                self.theme.colors.revealed()
-                            };
-                            
-                            let fill_color = lerp_color(covered_col, revealed_base, reveal_t);
-                            let charcoal = self.theme.colors.text_primary();
-                            
-                            match self.board.geometry {
-                                minecore::board::Geometry::Square => {
-                                    let cell_rect = egui::Rect::from_center_size(center, egui::vec2(draw_cell_size, draw_cell_size));
-                                    let shadow_rect = cell_rect.translate(egui::vec2(0.0, 2.0));
-                                    ui.painter().rect_filled(shadow_rect, self.theme.geometry.square_radius, egui::Color32::from_black_alpha(20));
-                                    ui.painter().rect_filled(cell_rect, self.theme.geometry.square_radius, fill_color);
-                                    if self.theme.geometry.border_thickness > 0.0 {
-                                        ui.painter().rect_stroke(cell_rect, self.theme.geometry.square_radius, egui::Stroke::new(self.theme.geometry.border_thickness, self.theme.colors.border()), egui::StrokeKind::Inside);
-                                    }
-                                }
-                                minecore::board::Geometry::Hex => {
-                                    let points = coords::hex_vertices(center, draw_cell_size * 0.95);
-                                    let shadow_points: Vec<egui::Pos2> = points.iter().map(|p| *p + egui::vec2(0.0, 2.0)).collect();
-                                    ui.painter().add(egui::Shape::convex_polygon(shadow_points, egui::Color32::from_black_alpha(20), egui::Stroke::NONE));
-                                    ui.painter().add(egui::Shape::convex_polygon(points.clone(), fill_color, egui::Stroke::NONE));
-                                    if self.theme.geometry.border_thickness > 0.0 {
-                                        ui.painter().add(egui::Shape::closed_line(points, egui::Stroke::new(self.theme.geometry.border_thickness, self.theme.colors.border())));
-                                    }
-                                }
-                            }
-                            
-                            match cell.state {
-                                CellState::Flagged => {
-                                    let base_y = center.y + cell_size * 0.2;
-                                    let tip_y = center.y - cell_size * 0.25;
-                                    let flag_right = center.x + cell_size * 0.2;
-                                    ui.painter().line_segment([egui::pos2(center.x, base_y), egui::pos2(center.x, tip_y)], egui::Stroke::new(2.0, charcoal));
-                                    ui.painter().add(egui::Shape::convex_polygon(
-                                        vec![egui::pos2(center.x, tip_y), egui::pos2(flag_right, tip_y + cell_size * 0.1), egui::pos2(center.x, tip_y + cell_size * 0.2)],
-                                        self.theme.colors.danger(),
-                                        egui::Stroke::NONE,
-                                    ));
-                                }
-                                CellState::Revealed => {
-                                    if cell.is_mine {
-                                        ui.painter().circle_filled(center, cell_size * 0.25, charcoal);
-                                        for i in 0..8 {
-                                            let a = (i as f32 * 45.0).to_radians();
-                                            let r = cell_size * 0.35;
-                                            ui.painter().line_segment([center, center + egui::vec2(a.cos() * r, a.sin() * r)], egui::Stroke::new(2.0, charcoal));
-                                        }
-                                        ui.painter().circle_filled(center + egui::vec2(-cell_size * 0.08, -cell_size * 0.08), cell_size * 0.08, egui::Color32::WHITE);
-                                    } else if cell.adjacent_mines > 0 {
-                                        let text_color = self.theme.colors.number_color(cell.adjacent_mines as usize);
-                                        ui.painter().text(center, egui::Align2::CENTER_CENTER, cell.adjacent_mines.to_string(), egui::FontId::proportional(cell_size * 0.7), text_color);
-                                    }
-                                }
-                                CellState::Covered => {}
-                            }
-                        }
+
+        ui.vertical_centered(|ui| {
+            let avail = ui.available_size();
+            let base_cell_size = 32.0;
+            let base_spacing = 2.0;
+
+            let raw_w = match self.board.geometry {
+                minecore::board::Geometry::Square => {
+                    (base_cell_size + base_spacing) * self.board.width as f32
+                }
+                minecore::board::Geometry::Hex => {
+                    (base_cell_size * 3.0_f32.sqrt() + base_spacing) * self.board.width as f32
+                }
+            };
+            let raw_h = match self.board.geometry {
+                minecore::board::Geometry::Square => {
+                    (base_cell_size + base_spacing) * self.board.height as f32
+                }
+                minecore::board::Geometry::Hex => {
+                    (base_cell_size * 1.5 + base_spacing) * self.board.height as f32
+                }
+            };
+
+            let scale = (avail.x / raw_w).min(avail.y / raw_h).min(1.5);
+            let cell_size = base_cell_size * scale;
+            let spacing = base_spacing * scale;
+
+            let board_w = raw_w * scale;
+            let board_h = raw_h * scale;
+
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(board_w, board_h), egui::Sense::click());
+
+            let pointer_pos = ui.input(|i| i.pointer.hover_pos());
+            let mut clicked_cell: Option<((usize, usize), egui::Pos2)> = None;
+            let mut secondary_clicked_cell: Option<((usize, usize), egui::Pos2)> = None;
+            let mut middle_clicked_cell: Option<((usize, usize), egui::Pos2)> = None;
+            let mut hovered_cell = None;
+
+            // Find hovered cell using accurate center calculation for both Square and Hexagon geometries
+            let mut closest_dist = f32::MAX;
+
+            for y in 0..self.board.height {
+                for x in 0..self.board.width {
+                    let cell = self.board.get_cell(x, y);
+                    if cell.is_none() {
+                        continue;
                     }
-                    
-                    let old_status = self.board.status;
+                    let cell = cell.unwrap();
+                    if !cell.active {
+                        continue;
+                    }
+
                     let time = ui.input(|i| i.time);
-                    if let Some(((x, y), pt)) = clicked_cell { 
-                        if self.board.first_click && self.board.is_no_guess {
-                            // Start generation thread
-                            let board_clone = self.board.clone();
-                            let (tx, rx) = std::sync::mpsc::channel();
-                            self.generation_rx = Some(rx);
-                            self.screen = AppScreen::GeneratingNoGuess;
-                            
-                            std::thread::spawn(move || {
-                                let result = minecore::no_guess::generate_no_guess_board(board_clone, x, y);
-                                let _ = tx.send((result, x, y));
-                            });
+                    let shake_offset = self.shake.get_offset(time);
+                    let center = coords::compute_cell_screen_center(
+                        self.board.geometry,
+                        x,
+                        y,
+                        self.board.radius,
+                        cell_size,
+                        spacing,
+                        rect.min,
+                        board_w,
+                        board_h,
+                        shake_offset,
+                    );
+                    let bounce = self.anim_tracker.get_bounce_scale(
+                        x,
+                        y,
+                        time,
+                        self.settings.animation_speed,
+                    );
+                    let draw_cell_size = cell_size * bounce;
+
+                    if let Some(pos) = pointer_pos {
+                        let dist = (pos - center).length();
+                        if dist < cell_size / 2.0 && dist < closest_dist {
+                            closest_dist = dist;
+                            hovered_cell = Some((x, y));
+                            if cell.state == minecore::board::CellState::Flagged {
+                                self.cursor_state = CustomCursorState::BoardFlag;
+                            } else if cell.state == minecore::board::CellState::Covered {
+                                self.cursor_state = CustomCursorState::BoardHover;
+                            } else {
+                                self.cursor_state = CustomCursorState::Default;
+                            }
+                            if response.clicked() {
+                                clicked_cell = Some(((x, y), center));
+                            }
+                            if response.secondary_clicked() {
+                                secondary_clicked_cell = Some(((x, y), center));
+                            }
+                            if response.middle_clicked() {
+                                middle_clicked_cell = Some(((x, y), center));
+                            }
+                        }
+                    }
+
+                    let is_hovered = hovered_cell == Some((x, y));
+                    let hover_t = ui
+                        .ctx()
+                        .animate_bool(egui::Id::new(("hover", x, y)), is_hovered);
+                    let reveal_t = ui.ctx().animate_bool(
+                        egui::Id::new(("reveal", x, y)),
+                        cell.state == CellState::Revealed,
+                    );
+
+                    let covered_base = self.theme.colors.covered();
+                    let covered_hov = self.theme.colors.button_bg();
+                    let covered_col = lerp_color(covered_base, covered_hov, hover_t);
+
+                    let revealed_base = if cell.is_mine {
+                        self.theme.colors.danger()
+                    } else {
+                        self.theme.colors.revealed()
+                    };
+
+                    let fill_color = lerp_color(covered_col, revealed_base, reveal_t);
+                    let charcoal = self.theme.colors.text_primary();
+
+                    match self.board.geometry {
+                        minecore::board::Geometry::Square => {
+                            let cell_rect = egui::Rect::from_center_size(
+                                center,
+                                egui::vec2(draw_cell_size, draw_cell_size),
+                            );
+                            let shadow_rect = cell_rect.translate(egui::vec2(0.0, 2.0));
+                            ui.painter().rect_filled(
+                                shadow_rect,
+                                self.theme.geometry.square_radius,
+                                egui::Color32::from_black_alpha(20),
+                            );
+                            ui.painter().rect_filled(
+                                cell_rect,
+                                self.theme.geometry.square_radius,
+                                fill_color,
+                            );
+                            if self.theme.geometry.border_thickness > 0.0 {
+                                ui.painter().rect_stroke(
+                                    cell_rect,
+                                    self.theme.geometry.square_radius,
+                                    egui::Stroke::new(
+                                        self.theme.geometry.border_thickness,
+                                        self.theme.colors.border(),
+                                    ),
+                                    egui::StrokeKind::Inside,
+                                );
+                            }
+                        }
+                        minecore::board::Geometry::Hex => {
+                            let points = coords::hex_vertices(center, draw_cell_size * 0.95);
+                            let shadow_points: Vec<egui::Pos2> =
+                                points.iter().map(|p| *p + egui::vec2(0.0, 2.0)).collect();
+                            ui.painter().add(egui::Shape::convex_polygon(
+                                shadow_points,
+                                egui::Color32::from_black_alpha(20),
+                                egui::Stroke::NONE,
+                            ));
+                            ui.painter().add(egui::Shape::convex_polygon(
+                                points.clone(),
+                                fill_color,
+                                egui::Stroke::NONE,
+                            ));
+                            if self.theme.geometry.border_thickness > 0.0 {
+                                ui.painter().add(egui::Shape::closed_line(
+                                    points,
+                                    egui::Stroke::new(
+                                        self.theme.geometry.border_thickness,
+                                        self.theme.colors.border(),
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+
+                    match cell.state {
+                        CellState::Flagged => {
+                            let base_y = center.y + cell_size * 0.2;
+                            let tip_y = center.y - cell_size * 0.25;
+                            let flag_right = center.x + cell_size * 0.2;
+                            ui.painter().line_segment(
+                                [egui::pos2(center.x, base_y), egui::pos2(center.x, tip_y)],
+                                egui::Stroke::new(2.0, charcoal),
+                            );
+                            ui.painter().add(egui::Shape::convex_polygon(
+                                vec![
+                                    egui::pos2(center.x, tip_y),
+                                    egui::pos2(flag_right, tip_y + cell_size * 0.1),
+                                    egui::pos2(center.x, tip_y + cell_size * 0.2),
+                                ],
+                                self.theme.colors.danger(),
+                                egui::Stroke::NONE,
+                            ));
+                        }
+                        CellState::Revealed => {
+                            if cell.is_mine {
+                                ui.painter()
+                                    .circle_filled(center, cell_size * 0.25, charcoal);
+                                for i in 0..8 {
+                                    let a = (i as f32 * 45.0).to_radians();
+                                    let r = cell_size * 0.35;
+                                    ui.painter().line_segment(
+                                        [center, center + egui::vec2(a.cos() * r, a.sin() * r)],
+                                        egui::Stroke::new(2.0, charcoal),
+                                    );
+                                }
+                                ui.painter().circle_filled(
+                                    center + egui::vec2(-cell_size * 0.08, -cell_size * 0.08),
+                                    cell_size * 0.08,
+                                    egui::Color32::WHITE,
+                                );
+                            } else if cell.adjacent_mines > 0 {
+                                let text_color =
+                                    self.theme.colors.number_color(cell.adjacent_mines as usize);
+                                ui.painter().text(
+                                    center,
+                                    egui::Align2::CENTER_CENTER,
+                                    cell.adjacent_mines.to_string(),
+                                    egui::FontId::proportional(cell_size * 0.7),
+                                    text_color,
+                                );
+                            }
+                        }
+                        CellState::Covered => {}
+                    }
+                }
+            }
+
+            let old_status = self.board.status;
+            let time = ui.input(|i| i.time);
+            if let Some(((x, y), pt)) = clicked_cell {
+                if self.board.first_click && self.board.is_no_guess {
+                    // Start generation thread
+                    let board_clone = self.board.clone();
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    self.generation_rx = Some(rx);
+                    self.screen = AppScreen::GeneratingNoGuess;
+
+                    std::thread::spawn(move || {
+                        let result = minecore::no_guess::generate_no_guess_board(board_clone, x, y);
+                        let _ = tx.send((result, x, y));
+                    });
+                } else {
+                    let was_covered = self
+                        .board
+                        .get_cell(x, y)
+                        .map(|c| c.state == CellState::Covered)
+                        .unwrap_or(false);
+                    if was_covered {
+                        self.audio.play(SoundEffect::TileClick);
+                        self.anim_tracker.on_reveal(x, y, time);
+                        self.particles.spawn_tile_pop(
+                            pt,
+                            self.theme.colors.accent(),
+                            self.settings.cursor.reduced_motion,
+                        );
+                        self.shake.add_trauma(0.04);
+                    }
+                    let was_covered_cells: Vec<(usize, usize)> = (0..self.board.height)
+                        .flat_map(|cy| (0..self.board.width).map(move |cx| (cx, cy)))
+                        .filter(|&(cx, cy)| {
+                            self.board
+                                .get_cell(cx, cy)
+                                .map_or(false, |c| c.state == CellState::Covered)
+                        })
+                        .collect();
+
+                    self.board.reveal(x, y);
+
+                    for (cx, cy) in was_covered_cells {
+                        if let Some(c) = self.board.get_cell(cx, cy) {
+                            if c.state == CellState::Revealed {
+                                self.anim_tracker.on_reveal(cx, cy, time);
+                            }
+                        }
+                    }
+
+                    if self.board.status == GameStatus::Lost {
+                        self.audio.play(SoundEffect::Explosion);
+                        self.audio.play(SoundEffect::Defeat);
+                        self.shake.add_trauma(0.85);
+                        self.particles.spawn_explosion(
+                            pt,
+                            self.theme.colors.danger(),
+                            self.settings.cursor.reduced_motion,
+                        );
+                    } else if self.board.status == GameStatus::Won {
+                        self.audio.play(SoundEffect::Victory);
+                        self.particles
+                            .spawn_victory(rect, 80, self.settings.cursor.reduced_motion);
+                        self.shake.add_trauma(0.2);
+                    } else if let Some(c) = self.board.get_cell(x, y) {
+                        if c.state == CellState::Revealed {
+                            self.audio.play(SoundEffect::TileReveal(c.adjacent_mines));
+                        }
+                    }
+                }
+            }
+            if let Some(((x, y), pt)) = secondary_clicked_cell {
+                let was_flagged = self
+                    .board
+                    .get_cell(x, y)
+                    .map(|c| c.state == CellState::Flagged)
+                    .unwrap_or(false);
+                self.board.toggle_flag(x, y);
+                if !was_flagged {
+                    self.audio.play(SoundEffect::FlagPlace);
+                    self.particles.spawn_tile_pop(
+                        pt,
+                        self.theme.colors.danger(),
+                        self.settings.cursor.reduced_motion,
+                    );
+                    self.shake.add_trauma(0.04);
+                } else {
+                    self.audio.play(SoundEffect::FlagRemove);
+                }
+            }
+            if let Some(((x, y), pt)) = middle_clicked_cell {
+                self.audio.play(SoundEffect::Chord);
+                self.shake.add_trauma(0.12);
+                self.particles.spawn_tile_pop(
+                    pt,
+                    self.theme.colors.accent(),
+                    self.settings.cursor.reduced_motion,
+                );
+
+                let was_covered_cells: Vec<(usize, usize)> = (0..self.board.height)
+                    .flat_map(|cy| (0..self.board.width).map(move |cx| (cx, cy)))
+                    .filter(|&(cx, cy)| {
+                        self.board
+                            .get_cell(cx, cy)
+                            .map_or(false, |c| c.state == CellState::Covered)
+                    })
+                    .collect();
+
+                self.board.chord(x, y);
+
+                for (cx, cy) in was_covered_cells {
+                    if let Some(c) = self.board.get_cell(cx, cy) {
+                        if c.state == CellState::Revealed {
+                            self.anim_tracker.on_reveal(cx, cy, time);
+                        }
+                    }
+                }
+
+                if self.board.status == GameStatus::Lost {
+                    self.audio.play(SoundEffect::Explosion);
+                    self.audio.play(SoundEffect::Defeat);
+                    self.shake.add_trauma(0.85);
+                    self.particles.spawn_explosion(
+                        pt,
+                        self.theme.colors.danger(),
+                        self.settings.cursor.reduced_motion,
+                    );
+                } else if self.board.status == GameStatus::Won {
+                    self.audio.play(SoundEffect::Victory);
+                    self.particles
+                        .spawn_victory(rect, 80, self.settings.cursor.reduced_motion);
+                    self.shake.add_trauma(0.2);
+                }
+            }
+
+            if old_status == GameStatus::Playing && self.board.status != GameStatus::Playing {
+                let mut true_end = true;
+
+                match self.mode_state.id {
+                    mode::GameModeId::Blitz => {
+                        if self.board.status == GameStatus::Won {
+                            self.mode_state.score += 500;
                         } else {
-                            let was_covered = self.board.get_cell(x, y).map(|c| c.state == CellState::Covered).unwrap_or(false);
-                            if was_covered {
-                                self.audio.play(SoundEffect::TileClick);
-                                self.anim_tracker.on_reveal(x, y, time);
-                                self.particles.spawn_tile_pop(pt, self.theme.colors.accent(), self.settings.cursor.reduced_motion);
-                                self.shake.add_trauma(0.04);
-                            }
-                            let was_covered_cells: Vec<(usize, usize)> = (0..self.board.height)
-                                .flat_map(|cy| (0..self.board.width).map(move |cx| (cx, cy)))
-                                .filter(|&(cx, cy)| self.board.get_cell(cx, cy).map_or(false, |c| c.state == CellState::Covered))
-                                .collect();
-
-                            self.board.reveal(x, y);
-
-                            for (cx, cy) in was_covered_cells {
-                                if let Some(c) = self.board.get_cell(cx, cy) {
-                                    if c.state == CellState::Revealed {
-                                        self.anim_tracker.on_reveal(cx, cy, time);
-                                    }
+                            self.mode_state.score = (self.mode_state.score - 150).max(0);
+                        }
+                        if self.mode_state.time_limit_sec.unwrap_or(0.0)
+                            - self.board.start_time.unwrap().elapsed().as_secs_f64()
+                            > 0.0
+                        {
+                            // Instant restart for Blitz
+                            self.board = match self.board.geometry {
+                                minecore::board::Geometry::Square => Board::new_square(
+                                    self.board.width,
+                                    self.board.height,
+                                    self.board.mine_count,
+                                ),
+                                minecore::board::Geometry::Hex => {
+                                    Board::new_hex(self.board.radius, self.board.mine_count)
                                 }
-                            }
-
-                            if self.board.status == GameStatus::Lost {
-                                self.audio.play(SoundEffect::Explosion);
-                                self.audio.play(SoundEffect::Defeat);
-                                self.shake.add_trauma(0.85);
-                                self.particles.spawn_explosion(pt, self.theme.colors.danger(), self.settings.cursor.reduced_motion);
-                            } else if self.board.status == GameStatus::Won {
-                                self.audio.play(SoundEffect::Victory);
-                                self.particles.spawn_victory(rect, 80, self.settings.cursor.reduced_motion);
-                                self.shake.add_trauma(0.2);
-                            } else if let Some(c) = self.board.get_cell(x, y) {
-                                if c.state == CellState::Revealed {
-                                    self.audio.play(SoundEffect::TileReveal(c.adjacent_mines));
-                                }
-                            }
+                            };
+                            true_end = false;
                         }
                     }
-                    if let Some(((x, y), pt)) = secondary_clicked_cell { 
-                        let was_flagged = self.board.get_cell(x, y).map(|c| c.state == CellState::Flagged).unwrap_or(false);
-                        self.board.toggle_flag(x, y);
-                        if !was_flagged {
-                            self.audio.play(SoundEffect::FlagPlace);
-                            self.particles.spawn_tile_pop(pt, self.theme.colors.danger(), self.settings.cursor.reduced_motion);
-                            self.shake.add_trauma(0.04);
+                    mode::GameModeId::Survival => {
+                        if self.board.status == GameStatus::Won {
+                            self.mode_state.stage += 1;
+                            self.board = match self.board.geometry {
+                                minecore::board::Geometry::Square => Board::new_square(
+                                    self.board.width,
+                                    self.board.height,
+                                    self.board.mine_count + 2,
+                                ),
+                                minecore::board::Geometry::Hex => {
+                                    Board::new_hex(self.board.radius, self.board.mine_count + 2)
+                                }
+                            };
+                            true_end = false;
                         } else {
-                            self.audio.play(SoundEffect::FlagRemove);
-                        }
-                    }
-                    if let Some(((x, y), pt)) = middle_clicked_cell { 
-                        self.audio.play(SoundEffect::Chord);
-                        self.shake.add_trauma(0.12);
-                        self.particles.spawn_tile_pop(pt, self.theme.colors.accent(), self.settings.cursor.reduced_motion);
-                        
-                        let was_covered_cells: Vec<(usize, usize)> = (0..self.board.height)
-                            .flat_map(|cy| (0..self.board.width).map(move |cx| (cx, cy)))
-                            .filter(|&(cx, cy)| self.board.get_cell(cx, cy).map_or(false, |c| c.state == CellState::Covered))
-                            .collect();
-
-                        self.board.chord(x, y);
-
-                        for (cx, cy) in was_covered_cells {
-                            if let Some(c) = self.board.get_cell(cx, cy) {
-                                if c.state == CellState::Revealed {
-                                    self.anim_tracker.on_reveal(cx, cy, time);
-                                }
-                            }
-                        }
-
-                        if self.board.status == GameStatus::Lost {
-                            self.audio.play(SoundEffect::Explosion);
-                            self.audio.play(SoundEffect::Defeat);
-                            self.shake.add_trauma(0.85);
-                            self.particles.spawn_explosion(pt, self.theme.colors.danger(), self.settings.cursor.reduced_motion);
-                        } else if self.board.status == GameStatus::Won {
-                            self.audio.play(SoundEffect::Victory);
-                            self.particles.spawn_victory(rect, 80, self.settings.cursor.reduced_motion);
-                            self.shake.add_trauma(0.2);
-                        }
-                    }
-                    
-                    if old_status == GameStatus::Playing && self.board.status != GameStatus::Playing {
-                        let mut true_end = true;
-
-                        match self.mode_state.id {
-                            mode::GameModeId::Blitz => {
-                                if self.board.status == GameStatus::Won {
-                                    self.mode_state.score += 500;
-                                } else {
-                                    self.mode_state.score = (self.mode_state.score - 150).max(0);
-                                }
-                                if self.mode_state.time_limit_sec.unwrap_or(0.0) - self.board.start_time.unwrap().elapsed().as_secs_f64() > 0.0 {
-                                    // Instant restart for Blitz
-                                    self.board = match self.board.geometry {
-                                        minecore::board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
-                                        minecore::board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
-                                    };
-                                    true_end = false;
-                                }
-                            }
-                            mode::GameModeId::Survival => {
-                                if self.board.status == GameStatus::Won {
-                                    self.mode_state.stage += 1;
-                                    self.board = match self.board.geometry {
-                                        minecore::board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count + 2),
-                                        minecore::board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count + 2),
-                                    };
-                                    true_end = false;
-                                } else {
-                                    self.mode_state.lives -= 1;
-                                    if self.mode_state.lives > 0 {
-                                        self.board = match self.board.geometry {
-                                            minecore::board::Geometry::Square => Board::new_square(self.board.width, self.board.height, self.board.mine_count),
-                                            minecore::board::Geometry::Hex => Board::new_hex(self.board.radius, self.board.mine_count),
-                                        };
-                                        true_end = false;
+                            self.mode_state.lives -= 1;
+                            if self.mode_state.lives > 0 {
+                                self.board = match self.board.geometry {
+                                    minecore::board::Geometry::Square => Board::new_square(
+                                        self.board.width,
+                                        self.board.height,
+                                        self.board.mine_count,
+                                    ),
+                                    minecore::board::Geometry::Hex => {
+                                        Board::new_hex(self.board.radius, self.board.mine_count)
                                     }
-                                }
-                            }
-                            mode::GameModeId::Expedition => {
-                                if self.board.status == GameStatus::Won {
-                                    if self.mode_state.stage < 30 {
-                                        self.mode_state.stage += 1;
-                                        self.board = match self.board.geometry {
-                                            minecore::board::Geometry::Square => Board::new_square(self.board.width, self.board.height, (20 + self.mode_state.stage).min(60) as usize),
-                                            minecore::board::Geometry::Hex => Board::new_hex(self.board.radius, (20 + self.mode_state.stage).min(60) as usize),
-                                        };
-                                        self.board.seed = Some(self.mode_state.stage as u64);
-                                        if let (Some(db), Some(profile)) = (&self.db, &self.active_profile) {
-                                            // Ensure we don't regress if they replay a lower stage
-                                            let current = db.get_stat(profile.id, "expedition_stage");
-                                            if self.mode_state.stage as i64 > current {
-                                                let _ = db.set_highest_stat(profile.id, "expedition_stage", self.mode_state.stage as i64);
-                                            }
-                                        }
-                                        true_end = false;
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-
-                        if true_end {
-                            if let (Some(db), Some(profile)) = (&self.db, &self.active_profile) {
-                                let duration_ms = if let (Some(s), Some(e)) = (self.board.start_time, self.board.end_time) {
-                                    e.duration_since(s).as_millis() as i64
-                                } else { 0 };
-                                let started_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64 - (duration_ms / 1000);
-                                
-                                let session = db::GameSession {
-                                    profile_id: profile.id,
-                                    mode: self.mode_state.id.name().to_string(),
-                                    geometry: match self.board.geometry { minecore::board::Geometry::Square => "Square".to_string(), minecore::board::Geometry::Hex => "Hex".to_string() },
-                                    board_width: self.board.width as i64,
-                                    board_height: self.board.height as i64,
-                                    hex_radius: self.board.radius as i64,
-                                    mine_count: self.board.mine_count as i64,
-                                    started_at,
-                                    duration_ms,
-                                    result: match self.board.status { GameStatus::Won => "Won".to_string(), _ => "Lost".to_string() }
                                 };
-                                let _ = db.save_session(&session);
-                                let _ = db.add_stat(profile.id, "total_playtime_s", duration_ms / 1000);
-                                
-                                if self.board.status == GameStatus::Won {
-                                    let _ = db.add_xp(profile.id, 50);
-                                    if self.board.geometry == minecore::board::Geometry::Square {
-                                        let _ = db.set_best_time(profile.id, "best_time_square", duration_ms / 1000);
-                                        let _ = db.unlock_achievement(profile.id, "first_win");
-                                        if self.board.mine_count >= 99 {
-                                            let _ = db.unlock_achievement(profile.id, "expert_clear");
-                                        }
-                                    } else {
-                                        let _ = db.set_best_time(profile.id, "best_time_hex", duration_ms / 1000);
-                                        let _ = db.unlock_achievement(profile.id, "hex_master");
-                                    }
-                                    
-                                    if self.mode_state.id == mode::GameModeId::Blitz && self.mode_state.score >= 2000 {
-                                        let _ = db.unlock_achievement(profile.id, "blitz_star");
-                                    }
-                                    if self.mode_state.id == mode::GameModeId::Survival && self.mode_state.stage >= 5 {
-                                        let _ = db.unlock_achievement(profile.id, "survival_5");
-                                    }
-                                    if self.mode_state.id == mode::GameModeId::Expedition && self.mode_state.stage >= 10 {
-                                        let _ = db.unlock_achievement(profile.id, "expedition_10");
-                                    }
-                                    if self.mode_state.id == mode::GameModeId::Daily {
-                                        let _ = db.unlock_achievement(profile.id, "daily_win");
-                                    }
-                                }
-                                self.profiles = db.get_profiles().unwrap_or_default();
-                                if let Some(p) = self.profiles.iter().find(|p| p.id == profile.id) {
-                                    self.active_profile = Some(p.clone());
-                                }
+                                true_end = false;
                             }
                         }
                     }
-                });
+                    mode::GameModeId::Expedition => {
+                        if self.board.status == GameStatus::Won {
+                            if self.mode_state.stage < 30 {
+                                self.mode_state.stage += 1;
+                                self.board = match self.board.geometry {
+                                    minecore::board::Geometry::Square => Board::new_square(
+                                        self.board.width,
+                                        self.board.height,
+                                        (20 + self.mode_state.stage).min(60) as usize,
+                                    ),
+                                    minecore::board::Geometry::Hex => Board::new_hex(
+                                        self.board.radius,
+                                        (20 + self.mode_state.stage).min(60) as usize,
+                                    ),
+                                };
+                                self.board.seed = Some(self.mode_state.stage as u64);
+                                if let (Some(db), Some(profile)) = (&self.db, &self.active_profile)
+                                {
+                                    // Ensure we don't regress if they replay a lower stage
+                                    let current = db.get_stat(profile.id, "expedition_stage");
+                                    if self.mode_state.stage as i64 > current {
+                                        let _ = db.set_highest_stat(
+                                            profile.id,
+                                            "expedition_stage",
+                                            self.mode_state.stage as i64,
+                                        );
+                                    }
+                                }
+                                true_end = false;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+
+                if true_end {
+                    if let (Some(db), Some(profile)) = (&self.db, &self.active_profile) {
+                        let duration_ms = if let (Some(s), Some(e)) =
+                            (self.board.start_time, self.board.end_time)
+                        {
+                            e.duration_since(s).as_millis() as i64
+                        } else {
+                            0
+                        };
+                        let started_at = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as i64
+                            - (duration_ms / 1000);
+
+                        let session = db::GameSession {
+                            profile_id: profile.id,
+                            mode: self.mode_state.id.name().to_string(),
+                            geometry: match self.board.geometry {
+                                minecore::board::Geometry::Square => "Square".to_string(),
+                                minecore::board::Geometry::Hex => "Hex".to_string(),
+                            },
+                            board_width: self.board.width as i64,
+                            board_height: self.board.height as i64,
+                            hex_radius: self.board.radius as i64,
+                            mine_count: self.board.mine_count as i64,
+                            started_at,
+                            duration_ms,
+                            result: match self.board.status {
+                                GameStatus::Won => "Won".to_string(),
+                                _ => "Lost".to_string(),
+                            },
+                        };
+                        let _ = db.save_session(&session);
+                        let _ = db.add_stat(profile.id, "total_playtime_s", duration_ms / 1000);
+
+                        if self.board.status == GameStatus::Won {
+                            let _ = db.add_xp(profile.id, 50);
+                            if self.board.geometry == minecore::board::Geometry::Square {
+                                let _ = db.set_best_time(
+                                    profile.id,
+                                    "best_time_square",
+                                    duration_ms / 1000,
+                                );
+                                let _ = db.unlock_achievement(profile.id, "first_win");
+                                if self.board.mine_count >= 99 {
+                                    let _ = db.unlock_achievement(profile.id, "expert_clear");
+                                }
+                            } else {
+                                let _ = db.set_best_time(
+                                    profile.id,
+                                    "best_time_hex",
+                                    duration_ms / 1000,
+                                );
+                                let _ = db.unlock_achievement(profile.id, "hex_master");
+                            }
+
+                            if self.mode_state.id == mode::GameModeId::Blitz
+                                && self.mode_state.score >= 2000
+                            {
+                                let _ = db.unlock_achievement(profile.id, "blitz_star");
+                            }
+                            if self.mode_state.id == mode::GameModeId::Survival
+                                && self.mode_state.stage >= 5
+                            {
+                                let _ = db.unlock_achievement(profile.id, "survival_5");
+                            }
+                            if self.mode_state.id == mode::GameModeId::Expedition
+                                && self.mode_state.stage >= 10
+                            {
+                                let _ = db.unlock_achievement(profile.id, "expedition_10");
+                            }
+                            if self.mode_state.id == mode::GameModeId::Daily {
+                                let _ = db.unlock_achievement(profile.id, "daily_win");
+                            }
+                        }
+                        self.profiles = db.get_profiles().unwrap_or_default();
+                        if let Some(p) = self.profiles.iter().find(|p| p.id == profile.id) {
+                            self.active_profile = Some(p.clone());
+                        }
+                    }
+                }
+            }
+        });
 
         if matches!(self.board.status, GameStatus::Playing) && self.board.start_time.is_some() {
             ui.ctx().request_repaint();
@@ -895,7 +1275,15 @@ impl MineShiftApp {
         let accent = self.theme.colors.accent();
 
         if ui_tokens::screen_header(ui, "PLAYER PROFILES", text_primary, border, card_bg, |ui| {
-            if ui.button(egui::RichText::new("✨ Cosmetics").size(15.0).strong().color(text_primary)).clicked() {
+            if ui
+                .button(
+                    egui::RichText::new("✨ Cosmetics")
+                        .size(15.0)
+                        .strong()
+                        .color(text_primary),
+                )
+                .clicked()
+            {
                 self.audio.play(SoundEffect::UiClick);
                 self.screen = AppScreen::ProfileCosmetics;
             }
@@ -909,155 +1297,230 @@ impl MineShiftApp {
         ui.add_space(16.0);
 
         ui_tokens::centered_container(ui, 820.0, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-            let mut action: Option<(&str, db::Profile)> = None;
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    let mut action: Option<(&str, db::Profile)> = None;
 
-            for profile in &self.profiles {
-                let is_active = self.active_profile.as_ref().map_or(false, |p| p.id == profile.id);
-                let frame_stroke = if is_active {
-                    egui::Stroke::new(2.0, accent)
-                } else {
-                    egui::Stroke::new(1.0, border)
-                };
+                    for profile in &self.profiles {
+                        let is_active = self
+                            .active_profile
+                            .as_ref()
+                            .map_or(false, |p| p.id == profile.id);
+                        let frame_stroke = if is_active {
+                            egui::Stroke::new(2.0, accent)
+                        } else {
+                            egui::Stroke::new(1.0, border)
+                        };
 
-                egui::Frame::new()
-                    .fill(card_bg)
-                    .corner_radius(12.0)
-                    .stroke(frame_stroke)
-                    .inner_margin(18.0)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(&profile.avatar_id).size(42.0));
-                            ui.add_space(10.0);
-                            ui.vertical(|ui| {
-                                if Some(profile.id) == self.rename_profile_id {
-                                    ui.horizontal(|ui| {
-                                        ui.text_edit_singleline(&mut self.rename_buffer);
-                                        if ui.button("Save").clicked() {
-                                            action = Some(("rename_save", profile.clone()));
-                                        }
-                                        if ui.button("Cancel").clicked() {
-                                            action = Some(("rename_cancel", profile.clone()));
-                                        }
-                                    });
-                                } else {
-                                    ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new(&profile.display_name).size(22.0).strong().color(text_primary));
-                                        if is_active {
-                                            ui.add_space(8.0);
-                                            egui::Frame::new().fill(accent).corner_radius(12.0).inner_margin(egui::vec2(10.0, 3.0)).show(ui, |ui| {
-                                                ui.label(egui::RichText::new("ACTIVE").size(12.0).strong().color(egui::Color32::WHITE));
+                        egui::Frame::new()
+                            .fill(card_bg)
+                            .corner_radius(12.0)
+                            .stroke(frame_stroke)
+                            .inner_margin(18.0)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(&profile.avatar_id).size(42.0));
+                                    ui.add_space(10.0);
+                                    ui.vertical(|ui| {
+                                        if Some(profile.id) == self.rename_profile_id {
+                                            ui.horizontal(|ui| {
+                                                ui.text_edit_singleline(&mut self.rename_buffer);
+                                                if ui.button("Save").clicked() {
+                                                    action = Some(("rename_save", profile.clone()));
+                                                }
+                                                if ui.button("Cancel").clicked() {
+                                                    action =
+                                                        Some(("rename_cancel", profile.clone()));
+                                                }
+                                            });
+                                        } else {
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new(&profile.display_name)
+                                                        .size(22.0)
+                                                        .strong()
+                                                        .color(text_primary),
+                                                );
+                                                if is_active {
+                                                    ui.add_space(8.0);
+                                                    egui::Frame::new()
+                                                        .fill(accent)
+                                                        .corner_radius(12.0)
+                                                        .inner_margin(egui::vec2(10.0, 3.0))
+                                                        .show(ui, |ui| {
+                                                            ui.label(
+                                                                egui::RichText::new("ACTIVE")
+                                                                    .size(12.0)
+                                                                    .strong()
+                                                                    .color(egui::Color32::WHITE),
+                                                            );
+                                                        });
+                                                }
                                             });
                                         }
+
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "Level {}",
+                                                profile.current_level
+                                            ))
+                                            .size(15.0)
+                                            .strong()
+                                            .color(accent),
+                                        );
+
+                                        let mut req = 100;
+                                        let mut lvl = 1;
+                                        let mut prev_req = 0;
+                                        while lvl < profile.current_level {
+                                            prev_req = req;
+                                            lvl += 1;
+                                            req += lvl * 100;
+                                        }
+                                        let progress = (profile.total_xp as f32 - prev_req as f32)
+                                            / (req as f32 - prev_req as f32).max(1.0);
+
+                                        let pb = egui::ProgressBar::new(progress)
+                                            .text(format!("{} / {} XP", profile.total_xp, req))
+                                            .fill(accent);
+                                        ui.add_sized([220.0, 16.0], pb);
                                     });
-                                }
 
-                                ui.label(egui::RichText::new(format!("Level {}", profile.current_level)).size(15.0).strong().color(accent));
-
-                                let mut req = 100;
-                                let mut lvl = 1;
-                                let mut prev_req = 0;
-                                while lvl < profile.current_level {
-                                    prev_req = req;
-                                    lvl += 1;
-                                    req += lvl * 100;
-                                }
-                                let progress = (profile.total_xp as f32 - prev_req as f32) / (req as f32 - prev_req as f32).max(1.0);
-
-                                let pb = egui::ProgressBar::new(progress).text(format!("{} / {} XP", profile.total_xp, req)).fill(accent);
-                                ui.add_sized([220.0, 16.0], pb);
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if !is_active {
+                                                if ui
+                                                    .button(
+                                                        egui::RichText::new("Delete")
+                                                            .size(15.0)
+                                                            .color(self.theme.colors.danger()),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    action = Some(("delete", profile.clone()));
+                                                }
+                                                ui.add_space(8.0);
+                                                if ui
+                                                    .button(
+                                                        egui::RichText::new("Rename")
+                                                            .size(15.0)
+                                                            .color(text_primary),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    action = Some(("rename", profile.clone()));
+                                                }
+                                                ui.add_space(8.0);
+                                                let select_btn = egui::Button::new(
+                                                    egui::RichText::new("Select")
+                                                        .size(15.0)
+                                                        .strong()
+                                                        .color(egui::Color32::WHITE),
+                                                )
+                                                .fill(accent)
+                                                .corner_radius(6.0);
+                                                if ui.add(select_btn).clicked() {
+                                                    action = Some(("select", profile.clone()));
+                                                }
+                                            } else {
+                                                if ui
+                                                    .button(
+                                                        egui::RichText::new("Rename")
+                                                            .size(15.0)
+                                                            .color(text_primary),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    action = Some(("rename", profile.clone()));
+                                                }
+                                            }
+                                        },
+                                    );
+                                });
                             });
+                        ui.add_space(10.0);
+                    }
 
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if !is_active {
-                                    if ui.button(egui::RichText::new("Delete").size(15.0).color(self.theme.colors.danger())).clicked() {
-                                        action = Some(("delete", profile.clone()));
-                                    }
-                                    ui.add_space(8.0);
-                                    if ui.button(egui::RichText::new("Rename").size(15.0).color(text_primary)).clicked() {
-                                        action = Some(("rename", profile.clone()));
-                                    }
-                                    ui.add_space(8.0);
-                                    let select_btn = egui::Button::new(
-                                        egui::RichText::new("Select").size(15.0).strong().color(egui::Color32::WHITE)
-                                    ).fill(accent).corner_radius(6.0);
-                                    if ui.add(select_btn).clicked() {
-                                        action = Some(("select", profile.clone()));
-                                    }
-                                } else {
-                                    if ui.button(egui::RichText::new("Rename").size(15.0).color(text_primary)).clicked() {
-                                        action = Some(("rename", profile.clone()));
+                    if let Some((cmd, profile)) = action {
+                        if cmd == "delete" {
+                            if let Some(ref db) = self.db {
+                                let _ = db.delete_profile(profile.id);
+                                self.profiles = db.get_profiles().unwrap_or_default();
+                            }
+                        } else if cmd == "select" {
+                            self.active_profile = Some(profile.clone());
+                            if let Some(ref db) = self.db {
+                                let _ = db.update_profile_last_played(profile.id);
+                            }
+                            self.load_profile_settings();
+                            self.apply_profile_theme();
+                            self.screen = AppScreen::MainMenu;
+                        } else if cmd == "rename" {
+                            self.rename_profile_id = Some(profile.id);
+                            self.rename_buffer = profile.display_name.clone();
+                        } else if cmd == "rename_save" {
+                            if let Some(ref db) = self.db {
+                                let _ = db.rename_profile(profile.id, &self.rename_buffer);
+                                self.profiles = db.get_profiles().unwrap_or_default();
+                                if let Some(p) = self.profiles.iter().find(|p| p.id == profile.id) {
+                                    if self.active_profile.as_ref().map_or(false, |a| a.id == p.id)
+                                    {
+                                        self.active_profile = Some(p.clone());
                                     }
                                 }
-                            });
+                            }
+                            self.rename_profile_id = None;
+                        } else if cmd == "rename_cancel" {
+                            self.rename_profile_id = None;
+                        }
+                    }
+
+                    ui.add_space(20.0);
+                    ui_tokens::card_frame(card_bg, border, 12.0, 18.0).show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new("Create New Profile")
+                                .size(20.0)
+                                .strong()
+                                .color(text_primary),
+                        );
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Name:").size(16.0).color(text_primary));
+                            ui.text_edit_singleline(&mut self.new_profile_name);
+                            ui.add_space(8.0);
+                            let create_btn = egui::Button::new(
+                                egui::RichText::new("Create Profile")
+                                    .size(16.0)
+                                    .strong()
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(accent)
+                            .corner_radius(6.0);
+                            if ui.add(create_btn).clicked() {
+                                if !self.new_profile_name.trim().is_empty() {
+                                    if let Some(ref db) = self.db {
+                                        if let Ok(id) =
+                                            db.create_profile(self.new_profile_name.trim(), "👶")
+                                        {
+                                            self.profiles = db.get_profiles().unwrap_or_default();
+                                            if let Some(p) =
+                                                self.profiles.iter().find(|p| p.id == id)
+                                            {
+                                                self.active_profile = Some(p.clone());
+                                                self.load_profile_settings();
+                                                self.apply_profile_theme();
+                                                self.screen = AppScreen::MainMenu;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         });
                     });
-                ui.add_space(10.0);
-            }
-
-            if let Some((cmd, profile)) = action {
-                if cmd == "delete" {
-                    if let Some(ref db) = self.db {
-                        let _ = db.delete_profile(profile.id);
-                        self.profiles = db.get_profiles().unwrap_or_default();
-                    }
-                } else if cmd == "select" {
-                    self.active_profile = Some(profile.clone());
-                    if let Some(ref db) = self.db {
-                        let _ = db.update_profile_last_played(profile.id);
-                    }
-                    self.load_profile_settings();
-                    self.apply_profile_theme();
-                    self.screen = AppScreen::MainMenu;
-                } else if cmd == "rename" {
-                    self.rename_profile_id = Some(profile.id);
-                    self.rename_buffer = profile.display_name.clone();
-                } else if cmd == "rename_save" {
-                    if let Some(ref db) = self.db {
-                        let _ = db.rename_profile(profile.id, &self.rename_buffer);
-                        self.profiles = db.get_profiles().unwrap_or_default();
-                        if let Some(p) = self.profiles.iter().find(|p| p.id == profile.id) {
-                            if self.active_profile.as_ref().map_or(false, |a| a.id == p.id) {
-                                self.active_profile = Some(p.clone());
-                            }
-                        }
-                    }
-                    self.rename_profile_id = None;
-                } else if cmd == "rename_cancel" {
-                    self.rename_profile_id = None;
-                }
-            }
-
-            ui.add_space(20.0);
-            ui_tokens::card_frame(card_bg, border, 12.0, 18.0).show(ui, |ui| {
-                ui.label(egui::RichText::new("Create New Profile").size(20.0).strong().color(text_primary));
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Name:").size(16.0).color(text_primary));
-                    ui.text_edit_singleline(&mut self.new_profile_name);
-                    ui.add_space(8.0);
-                    let create_btn = egui::Button::new(
-                        egui::RichText::new("Create Profile").size(16.0).strong().color(egui::Color32::WHITE)
-                    ).fill(accent).corner_radius(6.0);
-                    if ui.add(create_btn).clicked() {
-                        if !self.new_profile_name.trim().is_empty() {
-                            if let Some(ref db) = self.db {
-                                if let Ok(id) = db.create_profile(self.new_profile_name.trim(), "👶") {
-                                    self.profiles = db.get_profiles().unwrap_or_default();
-                                    if let Some(p) = self.profiles.iter().find(|p| p.id == id) {
-                                        self.active_profile = Some(p.clone());
-                                        self.load_profile_settings();
-                                        self.apply_profile_theme();
-                                        self.screen = AppScreen::MainMenu;
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    ui.add_space(30.0);
                 });
-            });
-            ui.add_space(30.0);
-        });
         });
     }
 
@@ -1070,9 +1533,19 @@ impl MineShiftApp {
 
         if ui_tokens::screen_header(ui, "STATISTICS", text_primary, border, card_bg, |ui| {
             if let Some(ref p) = self.active_profile {
-                egui::Frame::new().fill(card_bg).stroke(egui::Stroke::new(1.0, border)).corner_radius(16.0).inner_margin(egui::vec2(14.0, 5.0)).show(ui, |ui| {
-                    ui.label(egui::RichText::new(format!("{} {}", p.avatar_id, p.display_name)).size(14.0).strong().color(text_primary));
-                });
+                egui::Frame::new()
+                    .fill(card_bg)
+                    .stroke(egui::Stroke::new(1.0, border))
+                    .corner_radius(16.0)
+                    .inner_margin(egui::vec2(14.0, 5.0))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(format!("{} {}", p.avatar_id, p.display_name))
+                                .size(14.0)
+                                .strong()
+                                .color(text_primary),
+                        );
+                    });
             }
         }) {
             self.audio.play(SoundEffect::UiClick);
@@ -1082,68 +1555,128 @@ impl MineShiftApp {
         ui.add_space(20.0);
 
         ui_tokens::centered_container(ui, 960.0, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-                if let Some(ref p) = self.active_profile {
-                    if let Some(ref db) = self.db {
-                        let played = db.get_stat(p.id, "games_played");
-                        let won = db.get_stat(p.id, "games_won");
-                        let win_rate = if played > 0 { (won as f64 / played as f64 * 100.0) as i64 } else { 0 };
-                        let best_square = db.get_stat(p.id, "best_time_square");
-                        let best_hex = db.get_stat(p.id, "best_time_hex");
-                        let total_playtime = db.get_stat(p.id, "total_playtime_s");
-                        let expedition_stage = db.get_stat(p.id, "expedition_stage").max(1);
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    if let Some(ref p) = self.active_profile {
+                        if let Some(ref db) = self.db {
+                            let played = db.get_stat(p.id, "games_played");
+                            let won = db.get_stat(p.id, "games_won");
+                            let win_rate = if played > 0 {
+                                (won as f64 / played as f64 * 100.0) as i64
+                            } else {
+                                0
+                            };
+                            let best_square = db.get_stat(p.id, "best_time_square");
+                            let best_hex = db.get_stat(p.id, "best_time_hex");
+                            let total_playtime = db.get_stat(p.id, "total_playtime_s");
+                            let expedition_stage = db.get_stat(p.id, "expedition_stage").max(1);
 
-                        let hours = total_playtime / 3600;
-                        let mins = (total_playtime % 3600) / 60;
-                        let time_str = format!("{}h {}m", hours, mins);
+                            let hours = total_playtime / 3600;
+                            let mins = (total_playtime % 3600) / 60;
+                            let time_str = format!("{}h {}m", hours, mins);
 
-                        ui.label(egui::RichText::new("CAREER OVERVIEW").size(14.0).strong().color(accent));
-                        ui.add_space(8.0);
+                            ui.label(
+                                egui::RichText::new("CAREER OVERVIEW")
+                                    .size(14.0)
+                                    .strong()
+                                    .color(accent),
+                            );
+                            ui.add_space(8.0);
 
-                        // Row 1: Primary Metrics (4 cards)
-                        let card_w = (ui.available_width() - 36.0) / 4.0;
-                        let stat_card = |ui: &mut egui::Ui, title: &str, value: &str, val_color: egui::Color32| {
-                            ui_tokens::card_frame(card_bg, border, 12.0, 16.0).show(ui, |ui| {
-                                ui.set_width(card_w);
-                                ui.label(egui::RichText::new(title.to_uppercase()).size(12.0).strong().color(text_muted));
-                                ui.add_space(6.0);
-                                ui.label(egui::RichText::new(value).size(30.0).strong().color(val_color));
+                            // Row 1: Primary Metrics (4 cards)
+                            let card_w = (ui.available_width() - 36.0) / 4.0;
+                            let stat_card =
+                                |ui: &mut egui::Ui,
+                                 title: &str,
+                                 value: &str,
+                                 val_color: egui::Color32| {
+                                    ui_tokens::card_frame(card_bg, border, 12.0, 16.0).show(
+                                        ui,
+                                        |ui| {
+                                            ui.set_width(card_w);
+                                            ui.label(
+                                                egui::RichText::new(title.to_uppercase())
+                                                    .size(12.0)
+                                                    .strong()
+                                                    .color(text_muted),
+                                            );
+                                            ui.add_space(6.0);
+                                            ui.label(
+                                                egui::RichText::new(value)
+                                                    .size(30.0)
+                                                    .strong()
+                                                    .color(val_color),
+                                            );
+                                        },
+                                    );
+                                };
+
+                            ui.horizontal(|ui| {
+                                stat_card(ui, "Games Played", &played.to_string(), text_primary);
+                                ui.add_space(12.0);
+                                stat_card(
+                                    ui,
+                                    "Games Won",
+                                    &won.to_string(),
+                                    self.theme.colors.success(),
+                                );
+                                ui.add_space(12.0);
+                                stat_card(ui, "Win Rate", &format!("{}%", win_rate), accent);
+                                ui.add_space(12.0);
+                                stat_card(ui, "Total Playtime", &time_str, text_primary);
                             });
-                        };
 
-                        ui.horizontal(|ui| {
-                            stat_card(ui, "Games Played", &played.to_string(), text_primary);
-                            ui.add_space(12.0);
-                            stat_card(ui, "Games Won", &won.to_string(), self.theme.colors.success());
-                            ui.add_space(12.0);
-                            stat_card(ui, "Win Rate", &format!("{}%", win_rate), accent);
-                            ui.add_space(12.0);
-                            stat_card(ui, "Total Playtime", &time_str, text_primary);
-                        });
+                            ui.add_space(20.0);
+                            ui.label(
+                                egui::RichText::new("RECORDS & MILESTONES")
+                                    .size(14.0)
+                                    .strong()
+                                    .color(accent),
+                            );
+                            ui.add_space(8.0);
 
-                        ui.add_space(20.0);
-                        ui.label(egui::RichText::new("RECORDS & MILESTONES").size(14.0).strong().color(accent));
-                        ui.add_space(8.0);
+                            // Row 2: Performance Records (4 cards)
+                            let sq_str = if best_square > 0 {
+                                format!("{}s", best_square)
+                            } else {
+                                "--".to_string()
+                            };
+                            let hex_str = if best_hex > 0 {
+                                format!("{}s", best_hex)
+                            } else {
+                                "--".to_string()
+                            };
 
-                        // Row 2: Performance Records (4 cards)
-                        let sq_str = if best_square > 0 { format!("{}s", best_square) } else { "--".to_string() };
-                        let hex_str = if best_hex > 0 { format!("{}s", best_hex) } else { "--".to_string() };
-
-                        ui.horizontal(|ui| {
-                            stat_card(ui, "Best Square Time", &sq_str, text_primary);
-                            ui.add_space(12.0);
-                            stat_card(ui, "Best Hex Time", &hex_str, text_primary);
-                            ui.add_space(12.0);
-                            stat_card(ui, "Expedition Stage", &format!("Stage {}", expedition_stage), accent);
-                            ui.add_space(12.0);
-                            stat_card(ui, "Player Level", &format!("Lv {}", p.current_level), self.theme.colors.success());
-                        });
+                            ui.horizontal(|ui| {
+                                stat_card(ui, "Best Square Time", &sq_str, text_primary);
+                                ui.add_space(12.0);
+                                stat_card(ui, "Best Hex Time", &hex_str, text_primary);
+                                ui.add_space(12.0);
+                                stat_card(
+                                    ui,
+                                    "Expedition Stage",
+                                    &format!("Stage {}", expedition_stage),
+                                    accent,
+                                );
+                                ui.add_space(12.0);
+                                stat_card(
+                                    ui,
+                                    "Player Level",
+                                    &format!("Lv {}", p.current_level),
+                                    self.theme.colors.success(),
+                                );
+                            });
+                        }
+                    } else {
+                        ui.label(
+                            egui::RichText::new("Select a profile to view statistics")
+                                .size(16.0)
+                                .color(text_muted),
+                        );
                     }
-                } else {
-                    ui.label(egui::RichText::new("Select a profile to view statistics").size(16.0).color(text_muted));
-                }
-                ui.add_space(30.0);
-            });
+                    ui.add_space(30.0);
+                });
         });
     }
 
@@ -1156,9 +1689,17 @@ impl MineShiftApp {
 
         let achievements_list = vec![
             ("first_win", "First Victory", "Win your first game."),
-            ("blitz_star", "Blitz Star", "Score 2000 points in Blitz mode."),
+            (
+                "blitz_star",
+                "Blitz Star",
+                "Score 2000 points in Blitz mode.",
+            ),
             ("survival_5", "Survivor", "Reach Stage 5 in Survival mode."),
-            ("expedition_10", "Explorer", "Reach Stage 10 in Expedition mode."),
+            (
+                "expedition_10",
+                "Explorer",
+                "Reach Stage 10 in Expedition mode.",
+            ),
             ("daily_win", "Daily Challenger", "Win a Daily Challenge."),
             ("expert_clear", "Expert Solver", "Clear an Expert board."),
             ("hex_master", "Hex Master", "Win a Hexagonal game."),
@@ -1172,35 +1713,89 @@ impl MineShiftApp {
             ("hex_10", "Hex Fanatic", "Win 10 Hexagonal games."),
             ("hex_50", "Hex Whisperer", "Win 50 Hexagonal games."),
             ("fast_60", "Speed Demon", "Win any game under 60 seconds."),
-            ("fast_30", "Lightning Fast", "Win any game under 30 seconds."),
-            ("fast_10", "Blink of an Eye", "Win any game under 10 seconds."),
-            ("playtime_1h", "Just One More", "Accumulate 1 hour of playtime."),
-            ("playtime_10h", "Time Well Spent", "Accumulate 10 hours of playtime."),
-            ("playtime_100h", "Chronos", "Accumulate 100 hours of playtime."),
-            ("chord_master", "Efficiency", "Win a game using chording extensively."),
+            (
+                "fast_30",
+                "Lightning Fast",
+                "Win any game under 30 seconds.",
+            ),
+            (
+                "fast_10",
+                "Blink of an Eye",
+                "Win any game under 10 seconds.",
+            ),
+            (
+                "playtime_1h",
+                "Just One More",
+                "Accumulate 1 hour of playtime.",
+            ),
+            (
+                "playtime_10h",
+                "Time Well Spent",
+                "Accumulate 10 hours of playtime.",
+            ),
+            (
+                "playtime_100h",
+                "Chronos",
+                "Accumulate 100 hours of playtime.",
+            ),
+            (
+                "chord_master",
+                "Efficiency",
+                "Win a game using chording extensively.",
+            ),
             ("no_flags", "Daredevil", "Win without placing any flags."),
             ("lose_1", "First Blood", "Lose a game. It happens."),
             ("lose_100", "Stubborn", "Lose 100 games. Keep trying!"),
-            ("first_hex", "New Dimensions", "Play your first Hexagonal game."),
+            (
+                "first_hex",
+                "New Dimensions",
+                "Play your first Hexagonal game.",
+            ),
             ("level_5", "Level 5", "Reach profile level 5."),
             ("level_10", "Level 10", "Reach profile level 10."),
             ("level_50", "Level 50", "Reach profile level 50."),
         ];
 
-        let unlocked: std::collections::HashSet<String> = if let (Some(p), Some(db)) = (&self.active_profile, &self.db) {
-            db.get_unlocked_achievements(p.id).unwrap_or_default().into_iter().collect()
-        } else {
-            std::collections::HashSet::new()
-        };
+        let unlocked: std::collections::HashSet<String> =
+            if let (Some(p), Some(db)) = (&self.active_profile, &self.db) {
+                db.get_unlocked_achievements(p.id)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect()
+            } else {
+                std::collections::HashSet::new()
+            };
 
         let total_count = achievements_list.len();
-        let unlocked_count = achievements_list.iter().filter(|(id, _, _)| unlocked.contains(&id.to_string())).count();
-        let progress_pct = if total_count > 0 { unlocked_count as f32 / total_count as f32 } else { 0.0 };
+        let unlocked_count = achievements_list
+            .iter()
+            .filter(|(id, _, _)| unlocked.contains(&id.to_string()))
+            .count();
+        let progress_pct = if total_count > 0 {
+            unlocked_count as f32 / total_count as f32
+        } else {
+            0.0
+        };
 
         if ui_tokens::screen_header(ui, "ACHIEVEMENTS", text_primary, border, card_bg, |ui| {
-            egui::Frame::new().fill(card_bg).stroke(egui::Stroke::new(1.0, border)).corner_radius(16.0).inner_margin(egui::vec2(16.0, 6.0)).show(ui, |ui| {
-                ui.label(egui::RichText::new(format!("🏆 {} / {} Unlocked ({:.0}%)", unlocked_count, total_count, progress_pct * 100.0)).size(14.0).strong().color(accent));
-            });
+            egui::Frame::new()
+                .fill(card_bg)
+                .stroke(egui::Stroke::new(1.0, border))
+                .corner_radius(16.0)
+                .inner_margin(egui::vec2(16.0, 6.0))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "🏆 {} / {} Unlocked ({:.0}%)",
+                            unlocked_count,
+                            total_count,
+                            progress_pct * 100.0
+                        ))
+                        .size(14.0)
+                        .strong()
+                        .color(accent),
+                    );
+                });
         }) {
             self.audio.play(SoundEffect::UiClick);
             self.screen = AppScreen::MainMenu;
@@ -1219,22 +1814,34 @@ impl MineShiftApp {
             ui.horizontal(|ui| {
                 let filters = [
                     (AchievementFilter::All, format!("All ({})", total_count)),
-                    (AchievementFilter::Unlocked, format!("Unlocked ({})", unlocked_count)),
-                    (AchievementFilter::Locked, format!("Locked ({})", total_count - unlocked_count)),
+                    (
+                        AchievementFilter::Unlocked,
+                        format!("Unlocked ({})", unlocked_count),
+                    ),
+                    (
+                        AchievementFilter::Locked,
+                        format!("Locked ({})", total_count - unlocked_count),
+                    ),
                 ];
 
                 for (f, label) in filters {
                     let is_active = self.achievement_filter == f;
-                    let btn = egui::Button::new(
-                        egui::RichText::new(label)
-                            .size(14.0)
-                            .strong()
-                            .color(if is_active { egui::Color32::WHITE } else { text_primary })
-                    )
-                    .fill(if is_active { accent } else { card_bg })
-                    .stroke(if is_active { egui::Stroke::NONE } else { egui::Stroke::new(1.0, border) })
-                    .corner_radius(14.0)
-                    .min_size(egui::vec2(110.0, 32.0));
+                    let btn =
+                        egui::Button::new(egui::RichText::new(label).size(14.0).strong().color(
+                            if is_active {
+                                egui::Color32::WHITE
+                            } else {
+                                text_primary
+                            },
+                        ))
+                        .fill(if is_active { accent } else { card_bg })
+                        .stroke(if is_active {
+                            egui::Stroke::NONE
+                        } else {
+                            egui::Stroke::new(1.0, border)
+                        })
+                        .corner_radius(14.0)
+                        .min_size(egui::vec2(110.0, 32.0));
 
                     if ui.add(btn).clicked() {
                         self.achievement_filter = f;
@@ -1246,70 +1853,118 @@ impl MineShiftApp {
             ui.add_space(16.0);
 
             // Responsive 2-Column Grid of Achievements (precisely fitted)
-            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-                let col_spacing = 16.0;
-                let card_w = ((ui.available_width() - col_spacing) / 2.0).floor().max(200.0);
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    let col_spacing = 16.0;
+                    let card_w = ((ui.available_width() - col_spacing) / 2.0)
+                        .floor()
+                        .max(200.0);
 
-                let filtered_achievements: Vec<_> = achievements_list.into_iter().filter(|(id, _, _)| {
-                    let is_unlocked = unlocked.contains(&id.to_string());
-                    match self.achievement_filter {
-                        AchievementFilter::All => true,
-                        AchievementFilter::Unlocked => is_unlocked,
-                        AchievementFilter::Locked => !is_unlocked,
-                    }
-                }).collect();
-
-                for chunk in filtered_achievements.chunks(2) {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = col_spacing;
-                        for (id, title, desc) in chunk {
+                    let filtered_achievements: Vec<_> = achievements_list
+                        .into_iter()
+                        .filter(|(id, _, _)| {
                             let is_unlocked = unlocked.contains(&id.to_string());
-                            let frame_stroke = if is_unlocked {
-                                egui::Stroke::new(1.5, accent)
-                            } else {
-                                egui::Stroke::new(1.0, border)
-                            };
+                            match self.achievement_filter {
+                                AchievementFilter::All => true,
+                                AchievementFilter::Unlocked => is_unlocked,
+                                AchievementFilter::Locked => !is_unlocked,
+                            }
+                        })
+                        .collect();
 
-                            egui::Frame::new()
-                                .fill(card_bg)
-                                .stroke(frame_stroke)
-                                .corner_radius(12.0)
-                                .inner_margin(16.0)
-                                .show(ui, |ui| {
-                                    ui.set_width(card_w);
-                                    ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new(if is_unlocked { "🏆" } else { "🔒" }).size(36.0));
-                                        ui.add_space(10.0);
-                                        ui.vertical(|ui| {
-                                            ui.horizontal(|ui| {
-                                                ui.label(egui::RichText::new(*title).size(16.0).strong().color(if is_unlocked { text_primary } else { text_muted }));
-                                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                    let badge_fill = if is_unlocked {
-                                                        self.theme.colors.success()
-                                                    } else if self.theme.is_dark() {
-                                                        egui::Color32::from_white_alpha(22)
-                                                    } else {
-                                                        egui::Color32::from_black_alpha(26)
-                                                    };
-                                                    egui::Frame::new().fill(badge_fill).corner_radius(8.0).inner_margin(egui::vec2(8.0, 2.0)).show(ui, |ui| {
-                                                        ui.label(egui::RichText::new(if is_unlocked { "UNLOCKED" } else { "LOCKED" })
-                                                            .size(10.0)
+                    for chunk in filtered_achievements.chunks(2) {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = col_spacing;
+                            for (id, title, desc) in chunk {
+                                let is_unlocked = unlocked.contains(&id.to_string());
+                                let frame_stroke = if is_unlocked {
+                                    egui::Stroke::new(1.5, accent)
+                                } else {
+                                    egui::Stroke::new(1.0, border)
+                                };
+
+                                egui::Frame::new()
+                                    .fill(card_bg)
+                                    .stroke(frame_stroke)
+                                    .corner_radius(12.0)
+                                    .inner_margin(16.0)
+                                    .show(ui, |ui| {
+                                        ui.set_width(card_w);
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                egui::RichText::new(if is_unlocked {
+                                                    "🏆"
+                                                } else {
+                                                    "🔒"
+                                                })
+                                                .size(36.0),
+                                            );
+                                            ui.add_space(10.0);
+                                            ui.vertical(|ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        egui::RichText::new(*title)
+                                                            .size(16.0)
                                                             .strong()
-                                                            .color(if is_unlocked { egui::Color32::WHITE } else { text_muted }));
-                                                    });
+                                                            .color(if is_unlocked {
+                                                                text_primary
+                                                            } else {
+                                                                text_muted
+                                                            }),
+                                                    );
+                                                    ui.with_layout(
+                                                        egui::Layout::right_to_left(
+                                                            egui::Align::Center,
+                                                        ),
+                                                        |ui| {
+                                                            let badge_fill = if is_unlocked {
+                                                                self.theme.colors.success()
+                                                            } else if self.theme.is_dark() {
+                                                                egui::Color32::from_white_alpha(22)
+                                                            } else {
+                                                                egui::Color32::from_black_alpha(26)
+                                                            };
+                                                            egui::Frame::new()
+                                                                .fill(badge_fill)
+                                                                .corner_radius(8.0)
+                                                                .inner_margin(egui::vec2(8.0, 2.0))
+                                                                .show(ui, |ui| {
+                                                                    ui.label(
+                                                                        egui::RichText::new(
+                                                                            if is_unlocked {
+                                                                                "UNLOCKED"
+                                                                            } else {
+                                                                                "LOCKED"
+                                                                            },
+                                                                        )
+                                                                        .size(10.0)
+                                                                        .strong()
+                                                                        .color(if is_unlocked {
+                                                                            egui::Color32::WHITE
+                                                                        } else {
+                                                                            text_muted
+                                                                        }),
+                                                                    );
+                                                                });
+                                                        },
+                                                    );
                                                 });
+                                                ui.add_space(4.0);
+                                                ui.label(
+                                                    egui::RichText::new(*desc)
+                                                        .size(13.0)
+                                                        .color(text_muted),
+                                                );
                                             });
-                                            ui.add_space(4.0);
-                                            ui.label(egui::RichText::new(*desc).size(13.0).color(text_muted));
                                         });
                                     });
-                                });
-                        }
-                    });
-                    ui.add_space(10.0);
-                }
-                ui.add_space(30.0);
-            });
+                            }
+                        });
+                        ui.add_space(10.0);
+                    }
+                    ui.add_space(30.0);
+                });
         });
     }
 
@@ -1328,89 +1983,133 @@ impl MineShiftApp {
         ui.add_space(16.0);
 
         ui_tokens::centered_container(ui, 860.0, |ui| {
-            egui::ScrollArea::vertical().auto_shrink([false; 2]).show(ui, |ui| {
-                let modes = vec![
-                    (mode::GameModeId::Classic, "⬜", "SQUARE"),
-                    (mode::GameModeId::Classic, "⬡", "HEXAGON"),
-                    (mode::GameModeId::Sprint, "⚡", "SQUARE"),
-                    (mode::GameModeId::NoGuess, "🧠", "SQUARE"),
-                    (mode::GameModeId::Blitz, "🔥", "SQUARE"),
-                    (mode::GameModeId::Survival, "❤️", "SQUARE"),
-                    (mode::GameModeId::Daily, "📅", "SQUARE"),
-                    (mode::GameModeId::Expedition, "🗺️", "SQUARE"),
-                    (mode::GameModeId::Zen, "🧘", "SQUARE"),
-                    (mode::GameModeId::Sandbox, "⚙️", "SQUARE"),
-                ];
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    let modes = vec![
+                        (mode::GameModeId::Classic, "⬜", "SQUARE"),
+                        (mode::GameModeId::Classic, "⬡", "HEXAGON"),
+                        (mode::GameModeId::Sprint, "⚡", "SQUARE"),
+                        (mode::GameModeId::NoGuess, "🧠", "SQUARE"),
+                        (mode::GameModeId::Blitz, "🔥", "SQUARE"),
+                        (mode::GameModeId::Survival, "❤️", "SQUARE"),
+                        (mode::GameModeId::Daily, "📅", "SQUARE"),
+                        (mode::GameModeId::Expedition, "🗺️", "SQUARE"),
+                        (mode::GameModeId::Zen, "🧘", "SQUARE"),
+                        (mode::GameModeId::Sandbox, "⚙️", "SQUARE"),
+                    ];
 
-                for (id, icon, variant) in modes {
-                    egui::Frame::new()
-                        .fill(card_bg)
-                        .stroke(egui::Stroke::new(1.0, border))
-                        .corner_radius(12.0)
-                        .inner_margin(16.0)
-                        .show(ui, |ui| {
-                            ui.set_width(ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new(icon).size(32.0));
-                                ui.add_space(12.0);
-                                ui.vertical(|ui| {
-                                    ui.label(egui::RichText::new(format!("{} - {}", id.name(), variant)).size(19.0).strong().color(text_primary));
-                                    ui.add_space(2.0);
-                                    ui.label(egui::RichText::new(id.desc()).size(14.0).color(text_muted));
-                                });
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    let play_btn = egui::Button::new(
-                                        egui::RichText::new("PLAY").size(15.0).strong().color(egui::Color32::WHITE)
-                                    )
-                                    .fill(accent)
-                                    .corner_radius(8.0)
-                                    .min_size(egui::vec2(96.0, 38.0));
+                    for (id, icon, variant) in modes {
+                        egui::Frame::new()
+                            .fill(card_bg)
+                            .stroke(egui::Stroke::new(1.0, border))
+                            .corner_radius(12.0)
+                            .inner_margin(16.0)
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new(icon).size(32.0));
+                                    ui.add_space(12.0);
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{} - {}",
+                                                id.name(),
+                                                variant
+                                            ))
+                                            .size(19.0)
+                                            .strong()
+                                            .color(text_primary),
+                                        );
+                                        ui.add_space(2.0);
+                                        ui.label(
+                                            egui::RichText::new(id.desc())
+                                                .size(14.0)
+                                                .color(text_muted),
+                                        );
+                                    });
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            let play_btn = egui::Button::new(
+                                                egui::RichText::new("PLAY")
+                                                    .size(15.0)
+                                                    .strong()
+                                                    .color(egui::Color32::WHITE),
+                                            )
+                                            .fill(accent)
+                                            .corner_radius(8.0)
+                                            .min_size(egui::vec2(96.0, 38.0));
 
-                                    if ui.add(play_btn).clicked() {
-                                        self.audio.play(SoundEffect::UiClick);
-                                        self.mode_state = mode::ModeState::new(id.clone());
-                                        if variant == "SQUARE" {
-                                            self.board = Board::new_square(16, 16, 40); // Intermediate
-                                        } else {
-                                            self.board = Board::new_hex(8, 40);
-                                        }
+                                            if ui.add(play_btn).clicked() {
+                                                self.audio.play(SoundEffect::UiClick);
+                                                self.mode_state = mode::ModeState::new(id.clone());
+                                                if variant == "SQUARE" {
+                                                    // Intermediate
+                                                    self.board = Board::new_square(16, 16, 40);
+                                                } else {
+                                                    self.board = Board::new_hex(8, 40);
+                                                }
 
-                                        if self.mode_state.id == mode::GameModeId::NoGuess {
-                                            self.board.is_no_guess = true;
-                                        } else if self.mode_state.id == mode::GameModeId::Blitz {
-                                            self.mode_state.time_limit_sec = Some(180.0);
-                                            self.mode_state.score = 0;
-                                        } else if self.mode_state.id == mode::GameModeId::Survival {
-                                            self.mode_state.lives = 3;
-                                            self.mode_state.stage = 1;
-                                        } else if self.mode_state.id == mode::GameModeId::Expedition {
-                                            self.mode_state.lives = 1;
-                                            if let (Some(db), Some(profile)) = (&self.db, &self.active_profile) {
-                                                self.mode_state.stage = db.get_stat(profile.id, "expedition_stage").max(1) as i32;
-                                            } else {
-                                                self.mode_state.stage = 1;
+                                                if self.mode_state.id == mode::GameModeId::NoGuess {
+                                                    self.board.is_no_guess = true;
+                                                } else if self.mode_state.id
+                                                    == mode::GameModeId::Blitz
+                                                {
+                                                    self.mode_state.time_limit_sec = Some(180.0);
+                                                    self.mode_state.score = 0;
+                                                } else if self.mode_state.id
+                                                    == mode::GameModeId::Survival
+                                                {
+                                                    self.mode_state.lives = 3;
+                                                    self.mode_state.stage = 1;
+                                                } else if self.mode_state.id
+                                                    == mode::GameModeId::Expedition
+                                                {
+                                                    self.mode_state.lives = 1;
+                                                    if let (Some(db), Some(profile)) =
+                                                        (&self.db, &self.active_profile)
+                                                    {
+                                                        self.mode_state.stage = db
+                                                            .get_stat(
+                                                                profile.id,
+                                                                "expedition_stage",
+                                                            )
+                                                            .max(1)
+                                                            as i32;
+                                                    } else {
+                                                        self.mode_state.stage = 1;
+                                                    }
+                                                    self.board.seed =
+                                                        Some(self.mode_state.stage as u64);
+                                                    self.board.mine_count =
+                                                        (20 + self.mode_state.stage).min(60)
+                                                            as usize;
+                                                } else if self.mode_state.id
+                                                    == mode::GameModeId::Daily
+                                                {
+                                                    use std::collections::hash_map::DefaultHasher;
+                                                    use std::hash::{Hash, Hasher};
+                                                    let now = std::time::SystemTime::now()
+                                                        .duration_since(std::time::UNIX_EPOCH)
+                                                        .unwrap()
+                                                        .as_secs();
+                                                    let days_since_epoch = now / 86400;
+                                                    let mut hasher = DefaultHasher::new();
+                                                    days_since_epoch.hash(&mut hasher);
+                                                    self.board.seed = Some(hasher.finish());
+                                                }
+
+                                                self.screen = AppScreen::Gameplay;
                                             }
-                                            self.board.seed = Some(self.mode_state.stage as u64);
-                                            self.board.mine_count = (20 + self.mode_state.stage).min(60) as usize;
-                                        } else if self.mode_state.id == mode::GameModeId::Daily {
-                                            use std::hash::{Hash, Hasher};
-                                            use std::collections::hash_map::DefaultHasher;
-                                            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-                                            let days_since_epoch = now / 86400;
-                                            let mut hasher = DefaultHasher::new();
-                                            days_since_epoch.hash(&mut hasher);
-                                            self.board.seed = Some(hasher.finish());
-                                        }
-
-                                        self.screen = AppScreen::Gameplay;
-                                    }
+                                        },
+                                    );
                                 });
                             });
-                        });
-                    ui.add_space(10.0);
-                }
-                ui.add_space(20.0);
-            });
+                        ui.add_space(10.0);
+                    }
+                    ui.add_space(20.0);
+                });
         });
     }
     fn show_generating(&mut self, ui: &mut egui::Ui) {
@@ -1450,17 +2149,30 @@ impl MineShiftApp {
                 .inner_margin(32.0)
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.label(egui::RichText::new("Preparing Solvable Board...").size(24.0).strong().color(text_primary));
+                        ui.label(
+                            egui::RichText::new("Preparing Solvable Board...")
+                                .size(24.0)
+                                .strong()
+                                .color(text_primary),
+                        );
                         ui.add_space(8.0);
-                        ui.label(egui::RichText::new("Generating a guaranteed deduction path without guessing").size(15.0).color(text_muted));
+                        ui.label(
+                            egui::RichText::new(
+                                "Generating a guaranteed deduction path without guessing",
+                            )
+                            .size(15.0)
+                            .color(text_muted),
+                        );
                         ui.add_space(24.0);
                         ui.spinner();
                         ui.add_space(28.0);
-                        let cancel_btn = egui::Button::new(egui::RichText::new("Cancel").size(16.0).color(text_primary))
-                            .fill(card_bg)
-                            .stroke(egui::Stroke::new(1.0, border))
-                            .corner_radius(8.0)
-                            .min_size(egui::vec2(120.0, 38.0));
+                        let cancel_btn = egui::Button::new(
+                            egui::RichText::new("Cancel").size(16.0).color(text_primary),
+                        )
+                        .fill(card_bg)
+                        .stroke(egui::Stroke::new(1.0, border))
+                        .corner_radius(8.0)
+                        .min_size(egui::vec2(120.0, 38.0));
                         if ui.add(cancel_btn).clicked() {
                             self.audio.play(SoundEffect::UiClick);
                             self.generation_rx = None;
@@ -1477,12 +2189,27 @@ impl MineShiftApp {
         let text_muted = self.theme.colors.text_muted();
         let accent = self.theme.colors.accent();
 
-        if ui_tokens::screen_header(ui, "CUSTOMIZATION HUB", text_primary, border, card_bg, |ui| {
-            if ui.button(egui::RichText::new("✨ Profile Cosmetics").size(15.0).strong().color(text_primary)).clicked() {
-                self.audio.play(SoundEffect::UiClick);
-                self.screen = AppScreen::ProfileCosmetics;
-            }
-        }) {
+        if ui_tokens::screen_header(
+            ui,
+            "CUSTOMIZATION HUB",
+            text_primary,
+            border,
+            card_bg,
+            |ui| {
+                if ui
+                    .button(
+                        egui::RichText::new("✨ Profile Cosmetics")
+                            .size(15.0)
+                            .strong()
+                            .color(text_primary),
+                    )
+                    .clicked()
+                {
+                    self.audio.play(SoundEffect::UiClick);
+                    self.screen = AppScreen::ProfileCosmetics;
+                }
+            },
+        ) {
             self.audio.play(SoundEffect::UiClick);
             self.screen = AppScreen::MainMenu;
             if let Some(ref prof) = self.active_profile {
@@ -1500,7 +2227,12 @@ impl MineShiftApp {
             ui.vertical(|ui| {
                 ui.set_width(250.0);
                 ui_tokens::card_frame(card_bg, border, 12.0, 16.0).show(ui, |ui| {
-                    ui.label(egui::RichText::new("Theme Presets").size(18.0).strong().color(text_primary));
+                    ui.label(
+                        egui::RichText::new("Theme Presets")
+                            .size(18.0)
+                            .strong()
+                            .color(text_primary),
+                    );
                     ui.add_space(8.0);
 
                     let presets = vec![
@@ -1515,12 +2247,24 @@ impl MineShiftApp {
                     for preset in presets {
                         let is_active = self.theme.id == preset.id;
                         let btn = egui::Button::new(
-                            egui::RichText::new(format!("{}  {}", if is_active { "●" } else { "○" }, &preset.name))
-                                .size(15.0)
-                                .color(if is_active { egui::Color32::WHITE } else { text_primary })
+                            egui::RichText::new(format!(
+                                "{}  {}",
+                                if is_active { "●" } else { "○" },
+                                &preset.name
+                            ))
+                            .size(15.0)
+                            .color(if is_active {
+                                egui::Color32::WHITE
+                            } else {
+                                text_primary
+                            }),
                         )
                         .fill(if is_active { accent } else { card_bg })
-                        .stroke(if is_active { egui::Stroke::NONE } else { egui::Stroke::new(1.0, border) })
+                        .stroke(if is_active {
+                            egui::Stroke::NONE
+                        } else {
+                            egui::Stroke::new(1.0, border)
+                        })
                         .corner_radius(6.0)
                         .min_size(egui::vec2(216.0, 36.0));
 
@@ -1534,7 +2278,12 @@ impl MineShiftApp {
                     ui.add_space(12.0);
                     ui.separator();
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Custom Themes").size(18.0).strong().color(text_primary));
+                    ui.label(
+                        egui::RichText::new("Custom Themes")
+                            .size(18.0)
+                            .strong()
+                            .color(text_primary),
+                    );
                     ui.add_space(8.0);
 
                     if let Some(ref prof) = self.active_profile {
@@ -1543,16 +2292,28 @@ impl MineShiftApp {
                                 for (id, name, data) in customs {
                                     let is_active = self.theme.id == id;
                                     let btn = egui::Button::new(
-                                        egui::RichText::new(format!("{}  {}", if is_active { "●" } else { "○" }, &name))
-                                            .size(15.0)
-                                            .color(if is_active { egui::Color32::WHITE } else { text_primary })
+                                        egui::RichText::new(format!(
+                                            "{}  {}",
+                                            if is_active { "●" } else { "○" },
+                                            &name
+                                        ))
+                                        .size(15.0)
+                                        .color(
+                                            if is_active {
+                                                egui::Color32::WHITE
+                                            } else {
+                                                text_primary
+                                            },
+                                        ),
                                     )
                                     .fill(if is_active { accent } else { card_bg })
                                     .corner_radius(6.0)
                                     .min_size(egui::vec2(208.0, 34.0));
 
                                     if ui.add(btn).clicked() {
-                                        if let Ok(mut imported) = serde_json::from_str::<crate::theme::Theme>(&data) {
+                                        if let Ok(mut imported) =
+                                            serde_json::from_str::<crate::theme::Theme>(&data)
+                                        {
                                             imported.is_custom = true;
                                             self.theme = imported;
                                         }
@@ -1564,27 +2325,50 @@ impl MineShiftApp {
                     }
 
                     ui.add_space(10.0);
-                    if ui.add_sized([208.0, 32.0], egui::Button::new("+ Create New Custom")).clicked() {
+                    if ui
+                        .add_sized([208.0, 32.0], egui::Button::new("+ Create New Custom"))
+                        .clicked()
+                    {
                         let mut new_theme = self.theme.clone();
                         new_theme.is_custom = true;
-                        new_theme.id = format!("custom_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
+                        new_theme.id = format!(
+                            "custom_{}",
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs()
+                        );
                         new_theme.name = "Custom Theme".into();
                         self.theme = new_theme;
                     }
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        if ui.add_sized([100.0, 30.0], egui::Button::new("Export")).clicked() {
+                        if ui
+                            .add_sized([100.0, 30.0], egui::Button::new("Export"))
+                            .clicked()
+                        {
                             if let Some(path) = rfd::FileDialog::new().save_file() {
                                 let data = serde_json::to_string_pretty(&self.theme).unwrap();
                                 let _ = std::fs::write(path, data);
                             }
                         }
-                        if ui.add_sized([100.0, 30.0], egui::Button::new("Import")).clicked() {
+                        if ui
+                            .add_sized([100.0, 30.0], egui::Button::new("Import"))
+                            .clicked()
+                        {
                             if let Some(path) = rfd::FileDialog::new().pick_file() {
                                 if let Ok(data) = std::fs::read_to_string(path) {
-                                    if let Ok(mut imported) = serde_json::from_str::<crate::theme::Theme>(&data) {
+                                    if let Ok(mut imported) =
+                                        serde_json::from_str::<crate::theme::Theme>(&data)
+                                    {
                                         imported.is_custom = true;
-                                        imported.id = format!("custom_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
+                                        imported.id = format!(
+                                            "custom_{}",
+                                            std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .unwrap()
+                                                .as_secs()
+                                        );
                                         self.theme = imported;
                                     }
                                 }
@@ -1594,11 +2378,19 @@ impl MineShiftApp {
 
                     if self.theme.is_custom {
                         ui.add_space(6.0);
-                        if ui.add_sized([208.0, 32.0], egui::Button::new("💾 Save to Profile")).clicked() {
+                        if ui
+                            .add_sized([208.0, 32.0], egui::Button::new("💾 Save to Profile"))
+                            .clicked()
+                        {
                             if let Some(ref prof) = self.active_profile {
                                 if let Some(ref db) = self.db {
                                     let data = serde_json::to_string(&self.theme).unwrap();
-                                    let _ = db.save_custom_theme(prof.id, &self.theme.id, &self.theme.name, &data);
+                                    let _ = db.save_custom_theme(
+                                        prof.id,
+                                        &self.theme.id,
+                                        &self.theme.name,
+                                        &data,
+                                    );
                                 }
                             }
                         }
@@ -1614,7 +2406,11 @@ impl MineShiftApp {
                 ui_tokens::card_frame(card_bg, border, 12.0, 18.0).show(ui, |ui| {
                     if self.theme.is_custom {
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("Theme Name:").strong().color(text_primary));
+                            ui.label(
+                                egui::RichText::new("Theme Name:")
+                                    .strong()
+                                    .color(text_primary),
+                            );
                             ui.text_edit_singleline(&mut self.theme.name);
                         });
                         ui.add_space(10.0);
@@ -1630,10 +2426,13 @@ impl MineShiftApp {
                         for (tab, label) in tabs {
                             let is_active = self.theme_studio_tab == tab;
                             let btn = egui::Button::new(
-                                egui::RichText::new(label)
-                                    .size(15.0)
-                                    .strong()
-                                    .color(if is_active { egui::Color32::WHITE } else { text_primary })
+                                egui::RichText::new(label).size(15.0).strong().color(
+                                    if is_active {
+                                        egui::Color32::WHITE
+                                    } else {
+                                        text_primary
+                                    },
+                                ),
                             )
                             .fill(if is_active { accent } else { card_bg })
                             .corner_radius(6.0)
@@ -1647,18 +2446,28 @@ impl MineShiftApp {
 
                     ui.add_space(14.0);
 
-                    egui::ScrollArea::vertical().auto_shrink([false; 2]).max_height(480.0).show(ui, |ui| {
-                        match self.theme_studio_tab {
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false; 2])
+                        .max_height(480.0)
+                        .show(ui, |ui| match self.theme_studio_tab {
                             ThemeStudioTab::Colors => {
-                                let color_row = |ui: &mut egui::Ui, name: &str, rgb: &mut (u8, u8, u8)| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new(name).size(15.0).color(text_primary));
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            color_picker(ui, rgb);
+                                let color_row =
+                                    |ui: &mut egui::Ui, name: &str, rgb: &mut (u8, u8, u8)| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                egui::RichText::new(name)
+                                                    .size(15.0)
+                                                    .color(text_primary),
+                                            );
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    color_picker(ui, rgb);
+                                                },
+                                            );
                                         });
-                                    });
-                                    ui.add_space(6.0);
-                                };
+                                        ui.add_space(6.0);
+                                    };
 
                                 color_row(ui, "Background", &mut self.theme.colors.bg);
                                 color_row(ui, "Menu Background", &mut self.theme.colors.menu_bg);
@@ -1674,31 +2483,70 @@ impl MineShiftApp {
                                 color_row(ui, "Button Fill", &mut self.theme.colors.button_bg);
                             }
                             ThemeStudioTab::Geometry => {
-                                ui.add(egui::Slider::new(&mut self.theme.geometry.cell_spacing, 0.0..=10.0).text("Cell Spacing"));
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut self.theme.geometry.cell_spacing,
+                                        0.0..=10.0,
+                                    )
+                                    .text("Cell Spacing"),
+                                );
                                 ui.add_space(10.0);
-                                ui.add(egui::Slider::new(&mut self.theme.geometry.square_radius, 0.0..=20.0).text("Square Radius"));
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut self.theme.geometry.square_radius,
+                                        0.0..=20.0,
+                                    )
+                                    .text("Square Radius"),
+                                );
                                 ui.add_space(10.0);
-                                ui.add(egui::Slider::new(&mut self.theme.geometry.shadow_depth, 0.0..=10.0).text("Shadow Depth"));
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut self.theme.geometry.shadow_depth,
+                                        0.0..=10.0,
+                                    )
+                                    .text("Shadow Depth"),
+                                );
                                 ui.add_space(10.0);
-                                ui.add(egui::Slider::new(&mut self.theme.geometry.animation_speed, 0.5..=3.0).text("Animation Speed"));
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut self.theme.geometry.animation_speed,
+                                        0.5..=3.0,
+                                    )
+                                    .text("Animation Speed"),
+                                );
                                 ui.add_space(10.0);
-                                ui.add(egui::Slider::new(&mut self.theme.geometry.border_thickness, 0.0..=5.0).text("Border Thickness"));
+                                ui.add(
+                                    egui::Slider::new(
+                                        &mut self.theme.geometry.border_thickness,
+                                        0.0..=5.0,
+                                    )
+                                    .text("Border Thickness"),
+                                );
                             }
                             ThemeStudioTab::Numbers => {
                                 for i in 0..8 {
                                     if i < self.theme.colors.number_colors.len() {
                                         ui.horizontal(|ui| {
-                                            ui.label(egui::RichText::new(format!("Number {}", i + 1)).size(15.0).color(text_primary));
-                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                color_picker(ui, &mut self.theme.colors.number_colors[i]);
-                                            });
+                                            ui.label(
+                                                egui::RichText::new(format!("Number {}", i + 1))
+                                                    .size(15.0)
+                                                    .color(text_primary),
+                                            );
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    color_picker(
+                                                        ui,
+                                                        &mut self.theme.colors.number_colors[i],
+                                                    );
+                                                },
+                                            );
                                         });
                                         ui.add_space(6.0);
                                     }
                                 }
                             }
-                        }
-                    });
+                        });
                 });
             });
 
@@ -1709,47 +2557,97 @@ impl MineShiftApp {
                 let avail_w = ui.available_width().max(340.0);
                 ui_tokens::card_frame(card_bg, border, 12.0, 18.0).show(ui, |ui| {
                     ui.set_width(avail_w - 30.0);
-                    ui.label(egui::RichText::new("Live Board Preview").size(18.0).strong().color(text_primary));
+                    ui.label(
+                        egui::RichText::new("Live Board Preview")
+                            .size(18.0)
+                            .strong()
+                            .color(text_primary),
+                    );
                     ui.add_space(2.0);
-                    ui.label(egui::RichText::new("Real-time preview of active theme geometry & palette").size(13.0).color(text_muted));
+                    ui.label(
+                        egui::RichText::new("Real-time preview of active theme geometry & palette")
+                            .size(13.0)
+                            .color(text_muted),
+                    );
                     ui.add_space(14.0);
 
                     // 1. Square Preview Grid (5x3 realistic board)
-                    ui.label(egui::RichText::new("Square Grid (5×3):").size(15.0).strong().color(text_primary));
+                    ui.label(
+                        egui::RichText::new("Square Grid (5×3):")
+                            .size(15.0)
+                            .strong()
+                            .color(text_primary),
+                    );
                     ui.add_space(8.0);
 
                     let cell_sz = 36.0;
                     let spacing = self.theme.geometry.cell_spacing.clamp(2.0, 8.0);
                     let grid_w = 5.0 * (cell_sz + spacing);
                     let grid_h = 3.0 * (cell_sz + spacing);
-                    let (sq_rect, _) = ui.allocate_exact_size(egui::vec2(grid_w, grid_h), egui::Sense::hover());
+                    let (sq_rect, _) =
+                        ui.allocate_exact_size(egui::vec2(grid_w, grid_h), egui::Sense::hover());
 
                     // (x, y, state: 0=covered, 1=flagged, 2=revealed blank, 3=rev 1, 4=rev 2, 5=rev 3)
                     let square_sample = [
-                        (0, 0, 0), (1, 0, 0), (2, 0, 1), (3, 0, 0), (4, 0, 0),
-                        (0, 1, 3), (1, 1, 4), (2, 1, 3), (3, 1, 0), (4, 1, 0),
-                        (0, 2, 2), (1, 2, 3), (2, 2, 0), (3, 2, 1), (4, 2, 0),
+                        (0, 0, 0),
+                        (1, 0, 0),
+                        (2, 0, 1),
+                        (3, 0, 0),
+                        (4, 0, 0),
+                        (0, 1, 3),
+                        (1, 1, 4),
+                        (2, 1, 3),
+                        (3, 1, 0),
+                        (4, 1, 0),
+                        (0, 2, 2),
+                        (1, 2, 3),
+                        (2, 2, 0),
+                        (3, 2, 1),
+                        (4, 2, 0),
                     ];
 
                     for (gx, gy, kind) in square_sample {
-                        let center = sq_rect.min + egui::vec2(
-                            gx as f32 * (cell_sz + spacing) + cell_sz / 2.0,
-                            gy as f32 * (cell_sz + spacing) + cell_sz / 2.0,
-                        );
-                        let cell_rect = egui::Rect::from_center_size(center, egui::vec2(cell_sz, cell_sz));
+                        let center = sq_rect.min
+                            + egui::vec2(
+                                gx as f32 * (cell_sz + spacing) + cell_sz / 2.0,
+                                gy as f32 * (cell_sz + spacing) + cell_sz / 2.0,
+                            );
+                        let cell_rect =
+                            egui::Rect::from_center_size(center, egui::vec2(cell_sz, cell_sz));
 
                         // Shadow
                         if self.theme.geometry.shadow_depth > 0.0 {
-                            let shadow = cell_rect.translate(egui::vec2(0.0, self.theme.geometry.shadow_depth * 0.5));
-                            ui.painter().rect_filled(shadow, self.theme.geometry.square_radius, egui::Color32::from_black_alpha(20));
+                            let shadow = cell_rect
+                                .translate(egui::vec2(0.0, self.theme.geometry.shadow_depth * 0.5));
+                            ui.painter().rect_filled(
+                                shadow,
+                                self.theme.geometry.square_radius,
+                                egui::Color32::from_black_alpha(20),
+                            );
                         }
 
                         let is_revealed = kind >= 2;
-                        let fill = if is_revealed { self.theme.colors.revealed() } else { self.theme.colors.covered() };
-                        ui.painter().rect_filled(cell_rect, self.theme.geometry.square_radius, fill);
+                        let fill = if is_revealed {
+                            self.theme.colors.revealed()
+                        } else {
+                            self.theme.colors.covered()
+                        };
+                        ui.painter().rect_filled(
+                            cell_rect,
+                            self.theme.geometry.square_radius,
+                            fill,
+                        );
 
                         if self.theme.geometry.border_thickness > 0.0 {
-                            ui.painter().rect_stroke(cell_rect, self.theme.geometry.square_radius, egui::Stroke::new(self.theme.geometry.border_thickness, self.theme.colors.border()), egui::StrokeKind::Inside);
+                            ui.painter().rect_stroke(
+                                cell_rect,
+                                self.theme.geometry.square_radius,
+                                egui::Stroke::new(
+                                    self.theme.geometry.border_thickness,
+                                    self.theme.colors.border(),
+                                ),
+                                egui::StrokeKind::Inside,
+                            );
                         }
 
                         if kind == 1 {
@@ -1757,40 +2655,73 @@ impl MineShiftApp {
                             let base_y = center.y + cell_sz * 0.22;
                             let tip_y = center.y - cell_sz * 0.25;
                             let flag_right = center.x + cell_sz * 0.22;
-                            ui.painter().line_segment([egui::pos2(center.x, base_y), egui::pos2(center.x, tip_y)], egui::Stroke::new(2.0, self.theme.colors.text_primary()));
+                            ui.painter().line_segment(
+                                [egui::pos2(center.x, base_y), egui::pos2(center.x, tip_y)],
+                                egui::Stroke::new(2.0, self.theme.colors.text_primary()),
+                            );
                             ui.painter().add(egui::Shape::convex_polygon(
-                                vec![egui::pos2(center.x, tip_y), egui::pos2(flag_right, tip_y + cell_sz * 0.12), egui::pos2(center.x, tip_y + cell_sz * 0.24)],
+                                vec![
+                                    egui::pos2(center.x, tip_y),
+                                    egui::pos2(flag_right, tip_y + cell_sz * 0.12),
+                                    egui::pos2(center.x, tip_y + cell_sz * 0.24),
+                                ],
                                 self.theme.colors.danger(),
                                 egui::Stroke::NONE,
                             ));
                         } else if kind == 3 {
-                            ui.painter().text(center, egui::Align2::CENTER_CENTER, "1", egui::FontId::proportional(cell_sz * 0.65), self.theme.colors.number_color(1));
+                            ui.painter().text(
+                                center,
+                                egui::Align2::CENTER_CENTER,
+                                "1",
+                                egui::FontId::proportional(cell_sz * 0.65),
+                                self.theme.colors.number_color(1),
+                            );
                         } else if kind == 4 {
-                            ui.painter().text(center, egui::Align2::CENTER_CENTER, "2", egui::FontId::proportional(cell_sz * 0.65), self.theme.colors.number_color(2));
+                            ui.painter().text(
+                                center,
+                                egui::Align2::CENTER_CENTER,
+                                "2",
+                                egui::FontId::proportional(cell_sz * 0.65),
+                                self.theme.colors.number_color(2),
+                            );
                         } else if kind == 5 {
-                            ui.painter().text(center, egui::Align2::CENTER_CENTER, "3", egui::FontId::proportional(cell_sz * 0.65), self.theme.colors.number_color(3));
+                            ui.painter().text(
+                                center,
+                                egui::Align2::CENTER_CENTER,
+                                "3",
+                                egui::FontId::proportional(cell_sz * 0.65),
+                                self.theme.colors.number_color(3),
+                            );
                         }
                     }
 
                     ui.add_space(20.0);
 
                     // 2. Hexagonal Preview Cluster (7-cell rosette)
-                    ui.label(egui::RichText::new("Hexagonal Cluster:").size(15.0).strong().color(text_primary));
+                    ui.label(
+                        egui::RichText::new("Hexagonal Cluster:")
+                            .size(15.0)
+                            .strong()
+                            .color(text_primary),
+                    );
                     ui.add_space(8.0);
 
                     let hex_r = 20.0;
-                    let (hex_canvas, _) = ui.allocate_exact_size(egui::vec2(avail_w - 40.0, 110.0), egui::Sense::hover());
+                    let (hex_canvas, _) = ui.allocate_exact_size(
+                        egui::vec2(avail_w - 40.0, 110.0),
+                        egui::Sense::hover(),
+                    );
                     let hex_origin = hex_canvas.min + egui::vec2(130.0, 55.0);
 
                     // Axial coordinates (q, r, kind: 0=covered, 1=flagged, 2=blank, 3=rev1, 4=rev2, 5=rev3)
                     let hex_sample = [
-                        (0, 0, 4),   // Center: "2"
-                        (1, 0, 0),   // Right: covered
-                        (1, -1, 3),  // Top-Right: "1"
-                        (0, -1, 0),  // Top-Left: covered
-                        (-1, 0, 1),  // Left: flagged
-                        (-1, 1, 5),  // Bottom-Left: "3"
-                        (0, 1, 0),   // Bottom-Right: covered
+                        (0, 0, 4),  // Center: "2"
+                        (1, 0, 0),  // Right: covered
+                        (1, -1, 3), // Top-Right: "1"
+                        (0, -1, 0), // Top-Left: covered
+                        (-1, 0, 1), // Left: flagged
+                        (-1, 1, 5), // Bottom-Left: "3"
+                        (0, 1, 0),  // Bottom-Right: covered
                     ];
 
                     for (q, r, kind) in hex_sample {
@@ -1800,34 +2731,78 @@ impl MineShiftApp {
 
                         let points = coords::hex_vertices(center, hex_r);
                         if self.theme.geometry.shadow_depth > 0.0 {
-                            let shadow_pts: Vec<egui::Pos2> = points.iter().map(|p| *p + egui::vec2(0.0, 2.0)).collect();
-                            ui.painter().add(egui::Shape::convex_polygon(shadow_pts, egui::Color32::from_black_alpha(20), egui::Stroke::NONE));
+                            let shadow_pts: Vec<egui::Pos2> =
+                                points.iter().map(|p| *p + egui::vec2(0.0, 2.0)).collect();
+                            ui.painter().add(egui::Shape::convex_polygon(
+                                shadow_pts,
+                                egui::Color32::from_black_alpha(20),
+                                egui::Stroke::NONE,
+                            ));
                         }
 
                         let is_revealed = kind >= 2;
-                        let fill = if is_revealed { self.theme.colors.revealed() } else { self.theme.colors.covered() };
-                        ui.painter().add(egui::Shape::convex_polygon(points.clone(), fill, egui::Stroke::NONE));
+                        let fill = if is_revealed {
+                            self.theme.colors.revealed()
+                        } else {
+                            self.theme.colors.covered()
+                        };
+                        ui.painter().add(egui::Shape::convex_polygon(
+                            points.clone(),
+                            fill,
+                            egui::Stroke::NONE,
+                        ));
 
                         if self.theme.geometry.border_thickness > 0.0 {
-                            ui.painter().add(egui::Shape::closed_line(points, egui::Stroke::new(self.theme.geometry.border_thickness, self.theme.colors.border())));
+                            ui.painter().add(egui::Shape::closed_line(
+                                points,
+                                egui::Stroke::new(
+                                    self.theme.geometry.border_thickness,
+                                    self.theme.colors.border(),
+                                ),
+                            ));
                         }
 
                         if kind == 1 {
                             let base_y = center.y + hex_r * 0.3;
                             let tip_y = center.y - hex_r * 0.35;
                             let flag_right = center.x + hex_r * 0.3;
-                            ui.painter().line_segment([egui::pos2(center.x, base_y), egui::pos2(center.x, tip_y)], egui::Stroke::new(2.0, self.theme.colors.text_primary()));
+                            ui.painter().line_segment(
+                                [egui::pos2(center.x, base_y), egui::pos2(center.x, tip_y)],
+                                egui::Stroke::new(2.0, self.theme.colors.text_primary()),
+                            );
                             ui.painter().add(egui::Shape::convex_polygon(
-                                vec![egui::pos2(center.x, tip_y), egui::pos2(flag_right, tip_y + hex_r * 0.15), egui::pos2(center.x, tip_y + hex_r * 0.3)],
+                                vec![
+                                    egui::pos2(center.x, tip_y),
+                                    egui::pos2(flag_right, tip_y + hex_r * 0.15),
+                                    egui::pos2(center.x, tip_y + hex_r * 0.3),
+                                ],
                                 self.theme.colors.danger(),
                                 egui::Stroke::NONE,
                             ));
                         } else if kind == 3 {
-                            ui.painter().text(center, egui::Align2::CENTER_CENTER, "1", egui::FontId::proportional(hex_r * 1.1), self.theme.colors.number_color(1));
+                            ui.painter().text(
+                                center,
+                                egui::Align2::CENTER_CENTER,
+                                "1",
+                                egui::FontId::proportional(hex_r * 1.1),
+                                self.theme.colors.number_color(1),
+                            );
                         } else if kind == 4 {
-                            ui.painter().text(center, egui::Align2::CENTER_CENTER, "2", egui::FontId::proportional(hex_r * 1.1), self.theme.colors.number_color(2));
+                            ui.painter().text(
+                                center,
+                                egui::Align2::CENTER_CENTER,
+                                "2",
+                                egui::FontId::proportional(hex_r * 1.1),
+                                self.theme.colors.number_color(2),
+                            );
                         } else if kind == 5 {
-                            ui.painter().text(center, egui::Align2::CENTER_CENTER, "3", egui::FontId::proportional(hex_r * 1.1), self.theme.colors.number_color(3));
+                            ui.painter().text(
+                                center,
+                                egui::Align2::CENTER_CENTER,
+                                "3",
+                                egui::FontId::proportional(hex_r * 1.1),
+                                self.theme.colors.number_color(3),
+                            );
                         }
                     }
                 });
@@ -1849,7 +2824,12 @@ impl MineShiftApp {
                 .stroke(egui::Stroke::new(1.0, border))
                 .inner_margin(egui::vec2(16.0, 6.0))
                 .show(ui, |ui| {
-                    ui.label(egui::RichText::new(&self.theme.name).size(14.0).strong().color(text_primary));
+                    ui.label(
+                        egui::RichText::new(&self.theme.name)
+                            .size(14.0)
+                            .strong()
+                            .color(text_primary),
+                    );
                 });
         }) {
             self.audio.play(SoundEffect::UiClick);
@@ -1905,7 +2885,7 @@ impl MineShiftApp {
             // Right Content Area
             ui.vertical(|ui| {
                 let avail_width = ui.available_width();
-                
+
                 // Section Header & Subtitle
                 let (title, subtitle) = match self.settings_tab {
                     SettingsTab::General => ("General", "Manage player profiles and default game rules"),
@@ -1979,13 +2959,13 @@ impl MineShiftApp {
                                 ui.add_space(8.0);
                                 ui.horizontal_wrapped(|ui| {
                                     let btn_s = egui::vec2(100.0, 32.0);
-                                    if ui.add_sized(btn_s, egui::Button::new("▶ Click")).clicked() { self.audio.play(SoundEffect::TileClick); }
-                                    if ui.add_sized(btn_s, egui::Button::new("▶ Reveal 1")).clicked() { self.audio.play(SoundEffect::TileReveal(1)); }
-                                    if ui.add_sized(btn_s, egui::Button::new("▶ Reveal 4")).clicked() { self.audio.play(SoundEffect::TileReveal(4)); }
-                                    if ui.add_sized(btn_s, egui::Button::new("▶ Flag")).clicked() { self.audio.play(SoundEffect::FlagPlace); }
-                                    if ui.add_sized(btn_s, egui::Button::new("▶ Chord")).clicked() { self.audio.play(SoundEffect::Chord); }
-                                    if ui.add_sized(btn_s, egui::Button::new("💥 Detonation")).clicked() { self.audio.play(SoundEffect::Explosion); self.shake.add_trauma(0.8); }
-                                    if ui.add_sized(btn_s, egui::Button::new("🏆 Victory")).clicked() { self.audio.play(SoundEffect::Victory); }
+                                    if ui.add_sized(btn_s, egui::Button::new("Click")).clicked() { self.audio.play(SoundEffect::TileClick); }
+                                    if ui.add_sized(btn_s, egui::Button::new("Reveal 1")).clicked() { self.audio.play(SoundEffect::TileReveal(1)); }
+                                    if ui.add_sized(btn_s, egui::Button::new("Reveal 4")).clicked() { self.audio.play(SoundEffect::TileReveal(4)); }
+                                    if ui.add_sized(btn_s, egui::Button::new("Flag")).clicked() { self.audio.play(SoundEffect::FlagPlace); }
+                                    if ui.add_sized(btn_s, egui::Button::new("Chord")).clicked() { self.audio.play(SoundEffect::Chord); }
+                                    if ui.add_sized(btn_s, egui::Button::new("Explosion")).clicked() { self.audio.play(SoundEffect::Explosion); self.shake.add_trauma(0.8); }
+                                    if ui.add_sized(btn_s, egui::Button::new("Victory")).clicked() { self.audio.play(SoundEffect::Victory); }
                                 });
                             });
                         }
@@ -2020,8 +3000,43 @@ impl MineShiftApp {
                                     self.sync_settings();
                                 }
                                 ui.add_space(10.0);
-                                if ui.button(egui::RichText::new("💥 Test Screen Shake Impulse").size(14.0)).clicked() {
-                                    self.shake.add_trauma(0.85);
+                                ui.horizontal(|ui| {
+                                    if ui.button(egui::RichText::new("Test Screen Shake Impulse").size(14.0).strong()).clicked() {
+                                        self.audio.play(SoundEffect::Explosion);
+                                        self.shake.add_trauma(0.85);
+                                    }
+                                    ui.add_space(8.0);
+                                    if self.settings.cursor.reduced_motion {
+                                        ui.label(egui::RichText::new("⚠ Suppressed by Reduced Motion setting").size(13.0).color(self.theme.colors.danger()));
+                                    } else if self.settings.screen_shake <= 0.01 {
+                                        ui.label(egui::RichText::new("⚠ Intensity is 0% — increase slider to test impulse").size(13.0).color(text_muted));
+                                    } else if self.shake.trauma > 0.02 {
+                                        let trauma_pct = (self.shake.trauma * 100.0) as u32;
+                                        ui.label(egui::RichText::new(format!("Impulse active (Trauma: {}%)", trauma_pct)).size(13.0).strong().color(accent));
+                                    }
+                                });
+
+                                // Reactive live simulation target in Settings
+                                if self.settings.screen_shake > 0.01 && !self.settings.cursor.reduced_motion {
+                                    ui.add_space(10.0);
+                                    let shake_offset = self.shake.get_offset(time);
+                                    let is_shaking = self.shake.trauma > 0.02;
+                                    let (target_rect, _) = ui.allocate_exact_size(egui::vec2(avail_width - 80.0, 36.0), egui::Sense::hover());
+                                    let transformed_rect = target_rect.translate(shake_offset);
+                                    ui.painter().rect(
+                                        transformed_rect,
+                                        8.0,
+                                        if is_shaking { accent.linear_multiply(0.25) } else { self.theme.colors.button_bg() },
+                                        egui::Stroke::new(1.5, if is_shaking { accent } else { border }),
+                                        egui::epaint::StrokeKind::Inside,
+                                    );
+                                    ui.painter().text(
+                                        transformed_rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        if is_shaking { "⚡ SHAKING IMPULSE ACTIVE ⚡" } else { "Simulated Target (Reacts to screen shake impulse)" },
+                                        egui::FontId::proportional(13.0),
+                                        if is_shaking { accent } else { text_muted },
+                                    );
                                 }
                             });
 
@@ -2118,7 +3133,7 @@ impl MineShiftApp {
                                     ui.add_space(6.0);
                                 }
                                 ui.add_space(14.0);
-                                if ui.button(egui::RichText::new("🎨 Open Full Customization Hub (Theme Studio)").size(15.0)).clicked() {
+                                if ui.button(egui::RichText::new("Open Full Customization Hub (Theme Studio)").size(15.0)).clicked() {
                                     self.audio.play(SoundEffect::UiClick);
                                     self.screen = AppScreen::ThemeStudio;
                                 }
@@ -2200,8 +3215,12 @@ impl MineShiftApp {
                         }
 
                         if let Some(t) = self.settings_saved_feedback {
-                            if time - t < 2.5 {
-                                ui.label(egui::RichText::new("✓ Settings saved!").size(15.0).strong().color(self.theme.colors.success()));
+                            if (time - t) < 2.5 || t > 1e8 {
+                                ui.horizontal(|ui| {
+                                    ui_tokens::checkmark_icon(ui, self.theme.colors.success(), 16.0);
+                                    ui.add_space(4.0);
+                                    ui.label(egui::RichText::new("Settings saved!").size(15.0).strong().color(self.theme.colors.success()));
+                                });
                             }
                         }
                     });
@@ -2220,7 +3239,14 @@ impl MineShiftApp {
         let accent = self.theme.colors.accent();
         let success = self.theme.colors.success();
 
-        if ui_tokens::screen_header(ui, "PROFILE COSMETICS", text_primary, border, card_bg, |_| {}) {
+        if ui_tokens::screen_header(
+            ui,
+            "PROFILE COSMETICS",
+            text_primary,
+            border,
+            card_bg,
+            |_| {},
+        ) {
             self.audio.play(SoundEffect::UiClick);
             self.screen = AppScreen::Profiles;
         }
@@ -2230,123 +3256,216 @@ impl MineShiftApp {
         ui_tokens::centered_container(ui, 880.0, |ui| {
             let mut updated = false;
             if let Some(ref mut prof) = self.active_profile {
-            ui.horizontal_top(|ui| {
-                // Column 1: Avatars & Badges Cards
-                ui.vertical(|ui| {
-                    ui.set_width(260.0);
-                    
-                    ui_tokens::card_frame(card_bg, border, 12.0, 16.0).show(ui, |ui| {
-                        ui.label(egui::RichText::new("Choose Avatar").size(17.0).strong().color(text_primary));
-                        ui.add_space(8.0);
-                        let avatars = ["🧑", "👽", "🤖", "🎭", "💾", "⚡", "🔮", "🎮"];
-                        egui::Grid::new("avatar_grid").spacing(egui::vec2(10.0, 10.0)).show(ui, |ui| {
-                            for (idx, &avatar) in avatars.iter().enumerate() {
-                                let is_sel = prof.avatar_id == avatar;
-                                let btn = egui::Button::new(egui::RichText::new(avatar).size(26.0))
-                                    .fill(if is_sel { accent } else { card_bg })
-                                    .stroke(if is_sel { egui::Stroke::NONE } else { egui::Stroke::new(1.0, border) })
-                                    .corner_radius(8.0)
-                                    .min_size(egui::vec2(44.0, 44.0));
+                ui.horizontal_top(|ui| {
+                    // Column 1: Avatars & Badges Cards
+                    ui.vertical(|ui| {
+                        ui.set_width(260.0);
+
+                        ui_tokens::card_frame(card_bg, border, 12.0, 16.0).show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new("Choose Avatar")
+                                    .size(17.0)
+                                    .strong()
+                                    .color(text_primary),
+                            );
+                            ui.add_space(8.0);
+                            let avatars = ["🧑", "👽", "🤖", "🎭", "💾", "⚡", "🔮", "🎮"];
+                            egui::Grid::new("avatar_grid")
+                                .spacing(egui::vec2(10.0, 10.0))
+                                .show(ui, |ui| {
+                                    for (idx, &avatar) in avatars.iter().enumerate() {
+                                        let is_sel = prof.avatar_id == avatar;
+                                        let btn = egui::Button::new(
+                                            egui::RichText::new(avatar).size(26.0),
+                                        )
+                                        .fill(if is_sel { accent } else { card_bg })
+                                        .stroke(if is_sel {
+                                            egui::Stroke::NONE
+                                        } else {
+                                            egui::Stroke::new(1.0, border)
+                                        })
+                                        .corner_radius(8.0)
+                                        .min_size(egui::vec2(44.0, 44.0));
+                                        if ui.add(btn).clicked() {
+                                            self.audio.play(SoundEffect::UiClick);
+                                            prof.avatar_id = avatar.to_string();
+                                            updated = true;
+                                        }
+                                        if (idx + 1) % 4 == 0 {
+                                            ui.end_row();
+                                        }
+                                    }
+                                });
+                        });
+
+                        ui.add_space(14.0);
+
+                        ui_tokens::card_frame(card_bg, border, 12.0, 16.0).show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new("Profile Badge")
+                                    .size(17.0)
+                                    .strong()
+                                    .color(text_primary),
+                            );
+                            ui.add_space(8.0);
+                            let badges = [
+                                "None",
+                                "🌟 Pioneer",
+                                "🔥 Streak",
+                                "🏆 Champion",
+                                "⚔️ Veteran",
+                            ];
+                            for badge in badges {
+                                let is_sel = prof.badge_id == badge;
+                                let btn = egui::Button::new(
+                                    egui::RichText::new(badge).size(14.0).strong().color(
+                                        if is_sel {
+                                            egui::Color32::WHITE
+                                        } else {
+                                            text_primary
+                                        },
+                                    ),
+                                )
+                                .fill(if is_sel { accent } else { card_bg })
+                                .stroke(if is_sel {
+                                    egui::Stroke::NONE
+                                } else {
+                                    egui::Stroke::new(1.0, border)
+                                })
+                                .corner_radius(8.0)
+                                .min_size(egui::vec2(220.0, 32.0));
                                 if ui.add(btn).clicked() {
                                     self.audio.play(SoundEffect::UiClick);
-                                    prof.avatar_id = avatar.to_string();
+                                    prof.badge_id = badge.to_string();
                                     updated = true;
                                 }
-                                if (idx + 1) % 4 == 0 {
-                                    ui.end_row();
-                                }
+                                ui.add_space(4.0);
                             }
                         });
                     });
 
-                    ui.add_space(14.0);
+                    ui.add_space(20.0);
 
-                    ui_tokens::card_frame(card_bg, border, 12.0, 16.0).show(ui, |ui| {
-                        ui.label(egui::RichText::new("Profile Badge").size(17.0).strong().color(text_primary));
-                        ui.add_space(8.0);
-                        let badges = ["None", "🌟 Pioneer", "🔥 Streak", "🏆 Champion", "⚔️ Veteran"];
-                        for badge in badges {
-                            let is_sel = prof.badge_id == badge;
-                            let btn = egui::Button::new(egui::RichText::new(badge).size(14.0).strong().color(if is_sel { egui::Color32::WHITE } else { text_primary }))
+                    // Column 2: Titles & Preview Card
+                    ui.vertical(|ui| {
+                        let avail = ui.available_width();
+
+                        ui_tokens::card_frame(card_bg, border, 12.0, 16.0).show(ui, |ui| {
+                            ui.set_width(avail - 20.0);
+                            ui.label(
+                                egui::RichText::new("Player Title")
+                                    .size(17.0)
+                                    .strong()
+                                    .color(text_primary),
+                            );
+                            ui.add_space(8.0);
+                            let titles = [
+                                "Novice Sweeper",
+                                "Logic Master",
+                                "Hexadecimal",
+                                "Mine Specialist",
+                                "The Untouchable",
+                                "Circuit Breaker",
+                            ];
+                            for title in titles {
+                                let is_sel = prof.title == title;
+                                let btn = egui::Button::new(
+                                    egui::RichText::new(title).size(15.0).color(if is_sel {
+                                        egui::Color32::WHITE
+                                    } else {
+                                        text_primary
+                                    }),
+                                )
                                 .fill(if is_sel { accent } else { card_bg })
-                                .stroke(if is_sel { egui::Stroke::NONE } else { egui::Stroke::new(1.0, border) })
-                                .corner_radius(8.0)
-                                .min_size(egui::vec2(220.0, 32.0));
-                            if ui.add(btn).clicked() {
-                                self.audio.play(SoundEffect::UiClick);
-                                prof.badge_id = badge.to_string();
-                                updated = true;
-                            }
-                            ui.add_space(4.0);
-                        }
-                    });
-                });
-                
-                ui.add_space(20.0);
-                
-                // Column 2: Titles & Preview Card
-                ui.vertical(|ui| {
-                    let avail = ui.available_width();
-                    
-                    ui_tokens::card_frame(card_bg, border, 12.0, 16.0).show(ui, |ui| {
-                        ui.set_width(avail - 20.0);
-                        ui.label(egui::RichText::new("Player Title").size(17.0).strong().color(text_primary));
-                        ui.add_space(8.0);
-                        let titles = ["Novice Sweeper", "Logic Master", "Hexadecimal", "Mine Specialist", "The Untouchable", "Circuit Breaker"];
-                        for title in titles {
-                            let is_sel = prof.title == title;
-                            let btn = egui::Button::new(egui::RichText::new(title).size(15.0).color(if is_sel { egui::Color32::WHITE } else { text_primary }))
-                                .fill(if is_sel { accent } else { card_bg })
-                                .stroke(if is_sel { egui::Stroke::NONE } else { egui::Stroke::new(1.0, border) })
+                                .stroke(if is_sel {
+                                    egui::Stroke::NONE
+                                } else {
+                                    egui::Stroke::new(1.0, border)
+                                })
                                 .corner_radius(8.0)
                                 .min_size(egui::vec2(avail - 50.0, 34.0));
-                            if ui.add(btn).clicked() {
-                                self.audio.play(SoundEffect::UiClick);
-                                prof.title = title.to_string();
-                                updated = true;
-                            }
-                            ui.add_space(6.0);
-                        }
-                    });
-
-                    ui.add_space(14.0);
-
-                    ui_tokens::card_frame(card_bg, border, 12.0, 20.0).show(ui, |ui| {
-                        ui.set_width(avail - 20.0);
-                        ui.label(egui::RichText::new("Live Profile Card Preview").size(17.0).strong().color(text_primary));
-                        ui.add_space(12.0);
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(&prof.avatar_id).size(52.0));
-                            ui.add_space(14.0);
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(&prof.display_name).size(22.0).strong().color(text_primary));
-                                    ui.add_space(8.0);
-                                    egui::Frame::new().fill(accent).corner_radius(8.0).inner_margin(egui::vec2(8.0, 3.0)).show(ui, |ui| {
-                                        ui.label(egui::RichText::new(format!("Level {}", prof.current_level)).size(12.0).strong().color(egui::Color32::WHITE));
-                                    });
-                                });
-                                ui.add_space(4.0);
-                                ui.label(egui::RichText::new(&prof.title).size(15.0).color(accent));
-                                if prof.badge_id != "None" && !prof.badge_id.is_empty() {
-                                    ui.add_space(2.0);
-                                    ui.label(egui::RichText::new(&prof.badge_id).size(14.0).strong().color(success));
+                                if ui.add(btn).clicked() {
+                                    self.audio.play(SoundEffect::UiClick);
+                                    prof.title = title.to_string();
+                                    updated = true;
                                 }
+                                ui.add_space(6.0);
+                            }
+                        });
+
+                        ui.add_space(14.0);
+
+                        ui_tokens::card_frame(card_bg, border, 12.0, 20.0).show(ui, |ui| {
+                            ui.set_width(avail - 20.0);
+                            ui.label(
+                                egui::RichText::new("Live Profile Card Preview")
+                                    .size(17.0)
+                                    .strong()
+                                    .color(text_primary),
+                            );
+                            ui.add_space(12.0);
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(&prof.avatar_id).size(52.0));
+                                ui.add_space(14.0);
+                                ui.vertical(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(&prof.display_name)
+                                                .size(22.0)
+                                                .strong()
+                                                .color(text_primary),
+                                        );
+                                        ui.add_space(8.0);
+                                        egui::Frame::new()
+                                            .fill(accent)
+                                            .corner_radius(8.0)
+                                            .inner_margin(egui::vec2(8.0, 3.0))
+                                            .show(ui, |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "Level {}",
+                                                        prof.current_level
+                                                    ))
+                                                    .size(12.0)
+                                                    .strong()
+                                                    .color(egui::Color32::WHITE),
+                                                );
+                                            });
+                                    });
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        egui::RichText::new(&prof.title).size(15.0).color(accent),
+                                    );
+                                    if prof.badge_id != "None" && !prof.badge_id.is_empty() {
+                                        ui.add_space(2.0);
+                                        ui.label(
+                                            egui::RichText::new(&prof.badge_id)
+                                                .size(14.0)
+                                                .strong()
+                                                .color(success),
+                                        );
+                                    }
+                                });
                             });
                         });
                     });
                 });
-            });
-            
-            if updated {
-                if let Some(ref db) = self.db {
-                    let _ = db.set_profile_cosmetics(prof.id, &prof.title, &prof.badge_id);
-                    let _ = db.set_profile_avatar(prof.id, &prof.avatar_id);
+
+                if updated {
+                    if let Some(ref db) = self.db {
+                        let _ = db.set_profile_cosmetics(prof.id, &prof.title, &prof.badge_id);
+                        let _ = db.set_profile_avatar(prof.id, &prof.avatar_id);
+                    }
                 }
+            } else {
+                ui.label(
+                    egui::RichText::new(
+                        "No active profile selected. Select or create a profile first.",
+                    )
+                    .size(16.0)
+                    .color(text_muted),
+                );
             }
-        } else {
-            ui.label(egui::RichText::new("No active profile selected. Select or create a profile first.").size(16.0).color(text_muted));
-        }
         });
     }
 }
@@ -2357,8 +3476,56 @@ fn color_picker(ui: &mut eframe::egui::Ui, color: &mut (u8, u8, u8)) {
     *color = (c[0], c[1], c[2]);
 }
 
+fn save_color_image_as_bmp(image: &egui::ColorImage, path: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let width = image.size[0] as u32;
+    let height = image.size[1] as u32;
+    let file_size = 54 + width * height * 4;
+
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(b"BM")?;
+    file.write_all(&file_size.to_le_bytes())?;
+    file.write_all(&0u32.to_le_bytes())?;
+    file.write_all(&54u32.to_le_bytes())?;
+
+    file.write_all(&40u32.to_le_bytes())?;
+    file.write_all(&(width as i32).to_le_bytes())?;
+    file.write_all(&(-(height as i32)).to_le_bytes())?;
+    file.write_all(&1u16.to_le_bytes())?;
+    file.write_all(&32u16.to_le_bytes())?;
+    file.write_all(&0u32.to_le_bytes())?;
+    file.write_all(&(width * height * 4).to_le_bytes())?;
+    file.write_all(&0u32.to_le_bytes())?;
+    file.write_all(&0u32.to_le_bytes())?;
+    file.write_all(&0u32.to_le_bytes())?;
+    file.write_all(&0u32.to_le_bytes())?;
+
+    for pixel in &image.pixels {
+        file.write_all(&[pixel.b(), pixel.g(), pixel.r(), pixel.a()])?;
+    }
+    file.flush()?;
+    Ok(())
+}
+
 impl eframe::App for MineShiftApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.frame_counter += 1;
+        if let Some(ref path) = self.screenshot_target.clone() {
+            if self.frame_counter == 5 {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            }
+            for event in ui.input(|i| i.raw.events.clone()) {
+                if let egui::Event::Screenshot { image, .. } = event {
+                    let _ = save_color_image_as_bmp(&image, path);
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+            if self.frame_counter > 100 {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+
         let time = ui.input(|i| i.time);
         let dt = if self.last_frame_time > 0.0 {
             (time - self.last_frame_time).clamp(0.001, 0.1) as f32
@@ -2382,7 +3549,7 @@ impl eframe::App for MineShiftApp {
                 }
             }
         }
-        
+
         // Dynamically synchronize egui visuals to active theme luminance and palette
         let mut visuals = if self.theme.is_dark() {
             egui::Visuals::dark()
@@ -2393,22 +3560,25 @@ impl eframe::App for MineShiftApp {
         visuals.window_fill = self.theme.colors.bg();
         visuals.extreme_bg_color = self.theme.colors.card_bg();
         visuals.faint_bg_color = self.theme.colors.card_bg();
-        visuals.widgets.noninteractive.bg_fill = self.theme.colors.card_bg();
+        visuals.widgets.noninteractive.bg_fill = self.theme.colors.button_bg();
         visuals.widgets.noninteractive.fg_stroke.color = self.theme.colors.text_primary();
-        visuals.widgets.inactive.bg_fill = self.theme.colors.card_bg();
+        visuals.widgets.inactive.bg_fill = self.theme.colors.button_bg();
         visuals.widgets.inactive.fg_stroke.color = self.theme.colors.text_primary();
         visuals.widgets.hovered.bg_fill = self.theme.colors.button_bg();
-        visuals.widgets.hovered.fg_stroke.color = self.theme.colors.text_primary();
+        visuals.widgets.hovered.fg_stroke.color = self.theme.colors.accent();
         visuals.widgets.active.bg_fill = self.theme.colors.button_bg();
         visuals.widgets.active.fg_stroke.color = self.theme.colors.accent();
         visuals.selection.bg_fill = self.theme.colors.accent();
+        visuals.slider_trailing_fill = true;
+        visuals.handle_shape = egui::style::HandleShape::Circle;
         ui.ctx().set_visuals(visuals);
 
         let mut frame_style = egui::Frame::central_panel(ui.style());
         frame_style.fill = self.theme.colors.bg();
-        
-        egui::CentralPanel::default().frame(frame_style).show(ui, |ui| {
-            match self.screen {
+
+        egui::CentralPanel::default()
+            .frame(frame_style)
+            .show(ui, |ui| match self.screen {
                 AppScreen::MainMenu => self.show_main_menu(ui),
                 AppScreen::Gameplay => self.show_gameplay(ui),
                 AppScreen::Profiles => self.show_profiles(ui),
@@ -2419,11 +3589,13 @@ impl eframe::App for MineShiftApp {
                 AppScreen::ThemeStudio => self.show_theme_studio(ui),
                 AppScreen::ProfileCosmetics => self.show_profile_cosmetics(ui),
                 AppScreen::Settings => self.show_settings(ui),
-            }
-        });
+            });
 
         // 1. Render particle effects layer on top of gameplay
-        let p_painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("particles_layer")));
+        let p_painter = ui.ctx().layer_painter(egui::LayerId::new(
+            egui::Order::Middle,
+            egui::Id::new("particles_layer"),
+        ));
         self.particles.render(&p_painter);
 
         // 2. Render premium custom cursor on highest tooltip layer
@@ -2431,14 +3603,21 @@ impl eframe::App for MineShiftApp {
         if cursor_settings.enabled {
             ui.ctx().set_cursor_icon(egui::CursorIcon::None);
             if let Some(pos) = ui.ctx().input(|i| i.pointer.latest_pos()) {
-                let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("custom_cursor")));
-                
+                let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                    egui::Order::Tooltip,
+                    egui::Id::new("custom_cursor"),
+                ));
+
                 let is_clicking = ui.ctx().input(|i| i.pointer.any_down());
                 let base_radius = cursor_settings.size * 8.0;
-                let radius = if is_clicking { base_radius * 0.8 } else { base_radius };
-                
+                let radius = if is_clicking {
+                    base_radius * 0.8
+                } else {
+                    base_radius
+                };
+
                 let requested_icon = ui.ctx().output(|o| o.cursor_icon);
-                
+
                 let mut state = self.cursor_state;
                 if state == CustomCursorState::Default {
                     if requested_icon == egui::CursorIcon::PointingHand {
@@ -2447,7 +3626,7 @@ impl eframe::App for MineShiftApp {
                         state = CustomCursorState::Disabled;
                     }
                 }
-                
+
                 if matches!(self.screen, AppScreen::GeneratingNoGuess) {
                     state = CustomCursorState::Loading;
                 } else if matches!(self.screen, AppScreen::Gameplay) {
@@ -2462,24 +3641,56 @@ impl eframe::App for MineShiftApp {
                 if cursor_settings.trail && !cursor_settings.reduced_motion {
                     if let Some(interact_pos) = ui.ctx().input(|i| i.pointer.interact_pos()) {
                         let trail_pos = pos - (pos - interact_pos) * 0.5;
-                        painter.circle_filled(trail_pos, radius * 0.6, self.theme.colors.accent().linear_multiply(0.3));
+                        painter.circle_filled(
+                            trail_pos,
+                            radius * 0.6,
+                            self.theme.colors.accent().linear_multiply(0.3),
+                        );
                     }
                 }
-                
+
                 let (fill, stroke_col, stroke_width) = match state {
-                    CustomCursorState::Default => (self.theme.colors.accent(), self.theme.colors.border(), 1.5),
-                    CustomCursorState::UIHover => (self.theme.colors.text_primary(), self.theme.colors.accent(), 2.0),
-                    CustomCursorState::BoardHover => (egui::Color32::from_white_alpha(100), self.theme.colors.accent(), 2.0),
-                    CustomCursorState::BoardFlag => (self.theme.colors.danger(), self.theme.colors.border(), 1.5),
-                    CustomCursorState::Disabled => (self.theme.colors.text_muted(), self.theme.colors.border(), 1.0),
-                    CustomCursorState::Loading => (self.theme.colors.accent().linear_multiply(0.5), self.theme.colors.border(), 1.0),
-                    CustomCursorState::Victory => (self.theme.colors.success(), egui::Color32::WHITE, 2.0),
-                    CustomCursorState::Defeat => (self.theme.colors.danger(), egui::Color32::WHITE, 2.0),
+                    CustomCursorState::Default => {
+                        (self.theme.colors.accent(), self.theme.colors.border(), 1.5)
+                    }
+                    CustomCursorState::UIHover => (
+                        self.theme.colors.text_primary(),
+                        self.theme.colors.accent(),
+                        2.0,
+                    ),
+                    CustomCursorState::BoardHover => (
+                        egui::Color32::from_white_alpha(100),
+                        self.theme.colors.accent(),
+                        2.0,
+                    ),
+                    CustomCursorState::BoardFlag => {
+                        (self.theme.colors.danger(), self.theme.colors.border(), 1.5)
+                    }
+                    CustomCursorState::Disabled => (
+                        self.theme.colors.text_muted(),
+                        self.theme.colors.border(),
+                        1.0,
+                    ),
+                    CustomCursorState::Loading => (
+                        self.theme.colors.accent().linear_multiply(0.5),
+                        self.theme.colors.border(),
+                        1.0,
+                    ),
+                    CustomCursorState::Victory => {
+                        (self.theme.colors.success(), egui::Color32::WHITE, 2.0)
+                    }
+                    CustomCursorState::Defeat => {
+                        (self.theme.colors.danger(), egui::Color32::WHITE, 2.0)
+                    }
                 };
-                
+
                 painter.circle_filled(pos, radius, fill);
-                painter.circle_stroke(pos, radius + 2.0, egui::Stroke::new(stroke_width, stroke_col));
-                
+                painter.circle_stroke(
+                    pos,
+                    radius + 2.0,
+                    egui::Stroke::new(stroke_width, stroke_col),
+                );
+
                 // Inner geometric detail based on state
                 match state {
                     CustomCursorState::UIHover => {
@@ -2490,7 +3701,13 @@ impl eframe::App for MineShiftApp {
                         painter.rect_filled(rect, 0.0, egui::Color32::WHITE);
                     }
                     CustomCursorState::Disabled => {
-                        painter.line_segment([pos - egui::vec2(radius, radius), pos + egui::vec2(radius, radius)], egui::Stroke::new(1.5, stroke_col));
+                        painter.line_segment(
+                            [
+                                pos - egui::vec2(radius, radius),
+                                pos + egui::vec2(radius, radius),
+                            ],
+                            egui::Stroke::new(1.5, stroke_col),
+                        );
                     }
                     _ => {
                         painter.circle_filled(pos, radius * 0.3, egui::Color32::WHITE);

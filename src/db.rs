@@ -1,6 +1,6 @@
+use directories::ProjectDirs;
 use rusqlite::{Connection, Result, params};
 use std::path::PathBuf;
-use directories::ProjectDirs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug)]
@@ -41,10 +41,10 @@ impl Database {
         if let Some(parent) = db_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        
+
         let mut conn = Connection::open(&db_path)?;
         Self::apply_migrations(&mut conn)?;
-        
+
         Ok(Self { conn })
     }
 
@@ -61,8 +61,8 @@ impl Database {
             PathBuf::from("mineshift.db")
         }
     }
-    
-        fn apply_migrations(conn: &mut Connection) -> Result<()> {
+
+    fn apply_migrations(conn: &mut Connection) -> Result<()> {
         let tx = conn.transaction()?;
         tx.execute(
             "CREATE TABLE IF NOT EXISTS profiles (
@@ -79,10 +79,16 @@ impl Database {
             )",
             [],
         )?;
-        
+
         let _ = tx.execute("ALTER TABLE profiles ADD COLUMN selected_theme_id TEXT NOT NULL DEFAULT 'soft_circuit'", []);
-        let _ = tx.execute("ALTER TABLE profiles ADD COLUMN title TEXT NOT NULL DEFAULT 'Novice'", []);
-        let _ = tx.execute("ALTER TABLE profiles ADD COLUMN badge_id TEXT NOT NULL DEFAULT 'badge_01'", []);
+        let _ = tx.execute(
+            "ALTER TABLE profiles ADD COLUMN title TEXT NOT NULL DEFAULT 'Novice'",
+            [],
+        );
+        let _ = tx.execute(
+            "ALTER TABLE profiles ADD COLUMN badge_id TEXT NOT NULL DEFAULT 'badge_01'",
+            [],
+        );
 
         tx.execute(
             "CREATE TABLE IF NOT EXISTS custom_themes (
@@ -112,7 +118,7 @@ impl Database {
             )",
             [],
         )?;
-        
+
         tx.execute(
             "CREATE TABLE IF NOT EXISTS profile_achievements (
                 profile_id INTEGER NOT NULL,
@@ -123,7 +129,7 @@ impl Database {
             )",
             [],
         )?;
-        
+
         tx.execute(
             "CREATE TABLE IF NOT EXISTS game_statistics (
                 profile_id INTEGER NOT NULL,
@@ -172,7 +178,10 @@ impl Database {
     }
 
     pub fn create_profile(&self, display_name: &str, avatar_id: &str) -> Result<i64> {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         self.conn.execute(
             "INSERT INTO profiles (display_name, created_at, last_played_at, avatar_id, selected_theme_id) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![display_name, now, now, avatar_id, "soft_circuit"],
@@ -181,27 +190,43 @@ impl Database {
     }
 
     pub fn update_profile_last_played(&self, profile_id: i64) -> Result<()> {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
-        self.conn.execute("UPDATE profiles SET last_played_at = ?1 WHERE id = ?2", params![now, profile_id])?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        self.conn.execute(
+            "UPDATE profiles SET last_played_at = ?1 WHERE id = ?2",
+            params![now, profile_id],
+        )?;
         Ok(())
     }
 
     pub fn add_xp(&self, profile_id: i64, xp: i64) -> Result<()> {
-        self.conn.execute("UPDATE profiles SET total_xp = total_xp + ?1 WHERE id = ?2", params![xp, profile_id])?;
+        self.conn.execute(
+            "UPDATE profiles SET total_xp = total_xp + ?1 WHERE id = ?2",
+            params![xp, profile_id],
+        )?;
         self.update_level(profile_id)?;
         Ok(())
     }
 
     fn update_level(&self, profile_id: i64) -> Result<()> {
         // level threshold: level = sqrt(xp / 100) + 1 roughly
-        let xp: i64 = self.conn.query_row("SELECT total_xp FROM profiles WHERE id = ?1", params![profile_id], |r| r.get(0))?;
+        let xp: i64 = self.conn.query_row(
+            "SELECT total_xp FROM profiles WHERE id = ?1",
+            params![profile_id],
+            |r| r.get(0),
+        )?;
         let mut level = 1;
         let mut required = 100;
         while xp >= required {
             level += 1;
             required += level * 100;
         }
-        self.conn.execute("UPDATE profiles SET current_level = ?1 WHERE id = ?2", params![level, profile_id])?;
+        self.conn.execute(
+            "UPDATE profiles SET current_level = ?1 WHERE id = ?2",
+            params![level, profile_id],
+        )?;
         let _ = self.evaluate_achievements(profile_id);
         Ok(())
     }
@@ -215,7 +240,7 @@ impl Database {
                 session.hex_radius, session.mine_count, session.started_at, session.duration_ms, session.result
             ]
         )?;
-        
+
         // Update stats
         self.increment_stat(session.profile_id, "games_played")?;
         if session.result == "Won" {
@@ -224,9 +249,9 @@ impl Database {
                 self.increment_stat(session.profile_id, "hex_won")?;
             }
         }
-        
+
         let _ = self.evaluate_achievements(session.profile_id);
-        
+
         Ok(())
     }
 
@@ -243,7 +268,7 @@ impl Database {
         }
         Ok(())
     }
-    
+
     pub fn get_stat(&self, profile_id: i64, stat_key: &str) -> i64 {
         self.conn.query_row(
             "SELECT statistic_value FROM game_statistics WHERE profile_id = ?1 AND statistic_key = ?2",
@@ -253,7 +278,10 @@ impl Database {
     }
 
     pub fn unlock_achievement(&self, profile_id: i64, achievement_id: &str) -> Result<bool> {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         let res = self.conn.execute(
             "INSERT OR IGNORE INTO profile_achievements (profile_id, achievement_id, unlocked_at) VALUES (?1, ?2, ?3)",
             params![profile_id, achievement_id, now]
@@ -262,10 +290,14 @@ impl Database {
     }
 
     pub fn get_unlocked_achievements(&self, profile_id: i64) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare("SELECT achievement_id FROM profile_achievements WHERE profile_id = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT achievement_id FROM profile_achievements WHERE profile_id = ?1")?;
         let iter = stmt.query_map(params![profile_id], |row| row.get(0))?;
         let mut res = Vec::new();
-        for a in iter { res.push(a?); }
+        for a in iter {
+            res.push(a?);
+        }
         Ok(res)
     }
 
@@ -318,24 +350,51 @@ impl Database {
     }
 
     pub fn delete_profile(&self, profile_id: i64) -> Result<()> {
-        self.conn.execute("DELETE FROM profile_achievements WHERE profile_id = ?1", params![profile_id])?;
-        self.conn.execute("DELETE FROM game_statistics WHERE profile_id = ?1", params![profile_id])?;
-        self.conn.execute("DELETE FROM game_sessions WHERE profile_id = ?1", params![profile_id])?;
-        self.conn.execute("DELETE FROM profiles WHERE id = ?1", params![profile_id])?;
-        Ok(())
-    }
-    
-        pub fn set_profile_theme(&self, profile_id: i64, theme_id: &str) -> Result<()> {
-        self.conn.execute("UPDATE profiles SET selected_theme_id = ?2 WHERE id = ?1", params![profile_id, theme_id])?;
+        self.conn.execute(
+            "DELETE FROM profile_achievements WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        self.conn.execute(
+            "DELETE FROM game_statistics WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        self.conn.execute(
+            "DELETE FROM game_sessions WHERE profile_id = ?1",
+            params![profile_id],
+        )?;
+        self.conn
+            .execute("DELETE FROM profiles WHERE id = ?1", params![profile_id])?;
         Ok(())
     }
 
-    pub fn set_profile_cosmetics(&self, profile_id: i64, title: &str, badge_id: &str) -> Result<()> {
-        self.conn.execute("UPDATE profiles SET title = ?2, badge_id = ?3 WHERE id = ?1", params![profile_id, title, badge_id])?;
+    pub fn set_profile_theme(&self, profile_id: i64, theme_id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE profiles SET selected_theme_id = ?2 WHERE id = ?1",
+            params![profile_id, theme_id],
+        )?;
         Ok(())
     }
 
-    pub fn save_custom_theme(&self, profile_id: i64, theme_id: &str, name: &str, json_data: &str) -> Result<()> {
+    pub fn set_profile_cosmetics(
+        &self,
+        profile_id: i64,
+        title: &str,
+        badge_id: &str,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE profiles SET title = ?2, badge_id = ?3 WHERE id = ?1",
+            params![profile_id, title, badge_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn save_custom_theme(
+        &self,
+        profile_id: i64,
+        theme_id: &str,
+        name: &str,
+        json_data: &str,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT OR REPLACE INTO custom_themes (id, profile_id, name, data) VALUES (?1, ?2, ?3, ?4)",
             params![theme_id, profile_id, name, json_data]
@@ -344,26 +403,37 @@ impl Database {
     }
 
     pub fn get_custom_themes(&self, profile_id: i64) -> Result<Vec<(String, String, String)>> {
-        let mut stmt = self.conn.prepare("SELECT id, name, data FROM custom_themes WHERE profile_id = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, data FROM custom_themes WHERE profile_id = ?1")?;
         let iter = stmt.query_map(params![profile_id], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })?;
         let mut res = Vec::new();
-        for t in iter { res.push(t?); }
+        for t in iter {
+            res.push(t?);
+        }
         Ok(res)
     }
 
     pub fn delete_custom_theme(&self, theme_id: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM custom_themes WHERE id = ?1", params![theme_id])?;
+        self.conn
+            .execute("DELETE FROM custom_themes WHERE id = ?1", params![theme_id])?;
         Ok(())
     }
-        pub fn set_profile_avatar(&self, profile_id: i64, avatar_id: &str) -> Result<()> {
-        self.conn.execute("UPDATE profiles SET avatar_id = ?2 WHERE id = ?1", params![profile_id, avatar_id])?;
+    pub fn set_profile_avatar(&self, profile_id: i64, avatar_id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE profiles SET avatar_id = ?2 WHERE id = ?1",
+            params![profile_id, avatar_id],
+        )?;
         Ok(())
     }
 
     pub fn rename_profile(&self, profile_id: i64, new_name: &str) -> Result<()> {
-        self.conn.execute("UPDATE profiles SET display_name = ?2 WHERE id = ?1", params![profile_id, new_name])?;
+        self.conn.execute(
+            "UPDATE profiles SET display_name = ?2 WHERE id = ?1",
+            params![profile_id, new_name],
+        )?;
         Ok(())
     }
     pub fn evaluate_achievements(&self, profile_id: i64) -> Result<()> {
@@ -372,26 +442,67 @@ impl Database {
         let playtime = self.get_stat(profile_id, "total_playtime_s");
         let hex_won = self.get_stat(profile_id, "hex_won");
         let lost = played - won;
-        
-        let level: i64 = self.conn.query_row("SELECT current_level FROM profiles WHERE id = ?1", params![profile_id], |r| r.get(0)).unwrap_or(1);
-        
-        if played >= 10 { let _ = self.unlock_achievement(profile_id, "play_10"); }
-        if played >= 100 { let _ = self.unlock_achievement(profile_id, "play_100"); }
-        if played >= 1000 { let _ = self.unlock_achievement(profile_id, "play_1000"); }
-        if won >= 10 { let _ = self.unlock_achievement(profile_id, "win_10"); }
-        if won >= 50 { let _ = self.unlock_achievement(profile_id, "win_50"); }
-        if won >= 100 { let _ = self.unlock_achievement(profile_id, "win_100"); }
-        if won >= 500 { let _ = self.unlock_achievement(profile_id, "win_500"); }
-        if lost >= 1 { let _ = self.unlock_achievement(profile_id, "lose_1"); }
-        if lost >= 100 { let _ = self.unlock_achievement(profile_id, "lose_100"); }
-        if hex_won >= 10 { let _ = self.unlock_achievement(profile_id, "hex_10"); }
-        if hex_won >= 50 { let _ = self.unlock_achievement(profile_id, "hex_50"); }
-        if playtime >= 3600 { let _ = self.unlock_achievement(profile_id, "playtime_1h"); }
-        if playtime >= 36000 { let _ = self.unlock_achievement(profile_id, "playtime_10h"); }
-        if playtime >= 360000 { let _ = self.unlock_achievement(profile_id, "playtime_100h"); }
-        if level >= 5 { let _ = self.unlock_achievement(profile_id, "level_5"); }
-        if level >= 10 { let _ = self.unlock_achievement(profile_id, "level_10"); }
-        if level >= 50 { let _ = self.unlock_achievement(profile_id, "level_50"); }
+
+        let level: i64 = self
+            .conn
+            .query_row(
+                "SELECT current_level FROM profiles WHERE id = ?1",
+                params![profile_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(1);
+
+        if played >= 10 {
+            let _ = self.unlock_achievement(profile_id, "play_10");
+        }
+        if played >= 100 {
+            let _ = self.unlock_achievement(profile_id, "play_100");
+        }
+        if played >= 1000 {
+            let _ = self.unlock_achievement(profile_id, "play_1000");
+        }
+        if won >= 10 {
+            let _ = self.unlock_achievement(profile_id, "win_10");
+        }
+        if won >= 50 {
+            let _ = self.unlock_achievement(profile_id, "win_50");
+        }
+        if won >= 100 {
+            let _ = self.unlock_achievement(profile_id, "win_100");
+        }
+        if won >= 500 {
+            let _ = self.unlock_achievement(profile_id, "win_500");
+        }
+        if lost >= 1 {
+            let _ = self.unlock_achievement(profile_id, "lose_1");
+        }
+        if lost >= 100 {
+            let _ = self.unlock_achievement(profile_id, "lose_100");
+        }
+        if hex_won >= 10 {
+            let _ = self.unlock_achievement(profile_id, "hex_10");
+        }
+        if hex_won >= 50 {
+            let _ = self.unlock_achievement(profile_id, "hex_50");
+        }
+        if playtime >= 3600 {
+            let _ = self.unlock_achievement(profile_id, "playtime_1h");
+        }
+        if playtime >= 36000 {
+            let _ = self.unlock_achievement(profile_id, "playtime_10h");
+        }
+        if playtime >= 360000 {
+            let _ = self.unlock_achievement(profile_id, "playtime_100h");
+        }
+        if level >= 5 {
+            let _ = self.unlock_achievement(profile_id, "level_5");
+        }
+        if level >= 10 {
+            let _ = self.unlock_achievement(profile_id, "level_10");
+        }
+        if level >= 50 {
+            let _ = self.unlock_achievement(profile_id, "level_50");
+        }
         Ok(())
     }
 
@@ -404,7 +515,9 @@ impl Database {
     }
 
     pub fn get_profile_settings(&self, profile_id: i64) -> Result<Option<String>> {
-        let mut stmt = self.conn.prepare("SELECT settings_json FROM profile_settings WHERE profile_id = ?1")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT settings_json FROM profile_settings WHERE profile_id = ?1")?;
         let mut rows = stmt.query(params![profile_id])?;
         if let Some(row) = rows.next()? {
             Ok(Some(row.get(0)?))

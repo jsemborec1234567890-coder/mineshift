@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::theme::CursorSettings;
+use serde::{Deserialize, Serialize};
 
 fn default_vol() -> f32 {
     0.8

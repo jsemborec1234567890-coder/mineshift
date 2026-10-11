@@ -4,3 +4,6 @@ polyglot/**/*.obj
 polyglot/**/*.pdb
 polyglot/**/*.class
 
+
+__pycache__/
+*.pyc

@@ -499,4 +499,179 @@ mod tests {
         assert_eq!(c.best_time_ms, 38000);
         assert_eq!(c.attempts, 2);
     }
+
+    #[test]
+    fn test_challenge_profile_isolation() {
+        use crate::db::Database;
+        let db = Database::new_in_memory().unwrap();
+        let pid1 = db.create_profile("PlayerOne", "🦁").unwrap();
+        let pid2 = db.create_profile("PlayerTwo", "🐯").unwrap();
+
+        // Player 1 completes challenge
+        db.record_challenge_completion(pid1, "chal_noflag_beg", 42000, 75)
+            .unwrap();
+
+        let comps1 = db.get_challenge_completions(pid1).unwrap();
+        let comps2 = db.get_challenge_completions(pid2).unwrap();
+
+        assert_eq!(comps1.len(), 1, "Player 1 should have 1 completion");
+        assert_eq!(
+            comps2.len(),
+            0,
+            "Player 2 must be strictly isolated with 0 completions"
+        );
+
+        let profs = db.get_profiles().unwrap();
+        let p1 = profs.iter().find(|p| p.id == pid1).unwrap();
+        let p2 = profs.iter().find(|p| p.id == pid2).unwrap();
+        assert_eq!(p1.total_xp, 75);
+        assert_eq!(p2.total_xp, 0);
+    }
+
+    #[test]
+    fn test_challenge_attempt_increment_before_win() {
+        use crate::db::Database;
+        let db = Database::new_in_memory().unwrap();
+        let pid = db.create_profile("TryHard", "🚀").unwrap();
+
+        // 3 failed attempts
+        db.record_challenge_attempt(pid, "chal_hard").unwrap();
+        db.record_challenge_attempt(pid, "chal_hard").unwrap();
+        db.record_challenge_attempt(pid, "chal_hard").unwrap();
+
+        let comps = db.get_challenge_completions(pid).unwrap();
+        let rec = comps.get("chal_hard").unwrap();
+        assert_eq!(rec.attempts, 3);
+        assert_eq!(rec.best_time_ms, 0, "No completion time recorded yet");
+
+        // 4th attempt is a win
+        db.record_challenge_completion(pid, "chal_hard", 50000, 100)
+            .unwrap();
+        let comps_after = db.get_challenge_completions(pid).unwrap();
+        let rec_after = comps_after.get("chal_hard").unwrap();
+        assert_eq!(rec_after.attempts, 4);
+        assert_eq!(rec_after.best_time_ms, 50000);
+    }
+
+    #[test]
+    fn test_nine_game_modes_invariants() {
+        use minecore::mode::{GameModeId, ModeState};
+        let modes = [
+            GameModeId::Classic,
+            GameModeId::Sprint,
+            GameModeId::NoGuess,
+            GameModeId::Blitz,
+            GameModeId::Survival,
+            GameModeId::Daily,
+            GameModeId::Expedition,
+            GameModeId::Zen,
+            GameModeId::Sandbox,
+        ];
+        assert_eq!(modes.len(), 9);
+
+        for m in modes {
+            assert!(!m.name().is_empty());
+            assert!(!m.desc().is_empty());
+
+            let state = ModeState::new(m);
+            assert_eq!(state.id, m);
+            assert_eq!(state.score, 0);
+            assert!(state.lives >= 1);
+
+            if m == GameModeId::Survival {
+                assert_eq!(state.lives, 3, "Survival mode must start with 3 lives");
+            }
+            if m == GameModeId::Blitz {
+                assert_eq!(
+                    state.time_limit_sec,
+                    Some(180.0),
+                    "Blitz mode must start with 180s timer"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_performance_stress_suite() {
+        use crate::db::Database;
+        use minecore::board::Board;
+        use minecore::no_guess::generate_no_guess_board;
+        use minecore::solver::Solver;
+        use std::time::Instant;
+
+        // 1. Repeated Board Creation (1,000 boards)
+        let t0 = Instant::now();
+        for _ in 0..1000 {
+            let _ = Board::new_square(16, 16, 40);
+            let _ = Board::new_hex(5, 20);
+        }
+        let create_elapsed = t0.elapsed();
+        println!("1,000 Square + Hex board creations: {:?}", create_elapsed);
+        assert!(
+            create_elapsed.as_millis() < 500,
+            "1,000 creations must execute under 500ms"
+        );
+
+        // 2. Large Flood Reveal (40x40 board, 1 mine at corner, click opposite corner)
+        let mut large_board = Board::new_square(40, 40, 0);
+        large_board.first_click = false;
+        let mine_idx = large_board.get_index(0, 0);
+        large_board.cells[mine_idx].is_mine = true;
+        let t_flood = Instant::now();
+        large_board.reveal(39, 39);
+        let flood_elapsed = t_flood.elapsed();
+        println!("40x40 1,599 cell flood reveal: {:?}", flood_elapsed);
+        assert!(
+            flood_elapsed.as_millis() < 50,
+            "Large flood reveal must execute under 50ms"
+        );
+
+        // 3. Solver deduction throughput on a realistic 16x16 board
+        let mut sim_board = Board::new_square(16, 16, 30);
+        sim_board.reveal(8, 8);
+        let t_solve = Instant::now();
+        for _ in 0..50 {
+            let _ = Solver::deduce(&sim_board);
+            let _ = Solver::explain_step(&sim_board);
+        }
+        let solve_elapsed = t_solve.elapsed();
+        println!(
+            "50 Solver deduction + explanation cycles: {:?}",
+            solve_elapsed
+        );
+        assert!(
+            solve_elapsed.as_millis() < 100,
+            "50 solver cycles must execute under 100ms"
+        );
+
+        // 4. Repeated No Guess board generation (5 square + 5 hex)
+        let t_ng = Instant::now();
+        for _ in 0..5 {
+            let b_sq = Board::new_square(6, 6, 4);
+            let _ = generate_no_guess_board(b_sq, 2, 2);
+            let b_hex = Board::new_hex(2, 3);
+            let _ = generate_no_guess_board(b_hex, 2, 2);
+        }
+        let ng_elapsed = t_ng.elapsed();
+        println!("10 No Guess board generations: {:?}", ng_elapsed);
+        assert!(
+            ng_elapsed.as_millis() < 1000,
+            "10 No Guess generations must execute under 1000ms"
+        );
+
+        // 5. SQLite database transactions (100 operations)
+        let db = Database::new_in_memory().unwrap();
+        let pid = db.create_profile("StressUser", "⚡").unwrap();
+        let t_db = Instant::now();
+        for _ in 0..100 {
+            let _ = db.record_challenge_attempt(pid, "chal_test");
+            let _ = db.add_stat(pid, "total_clicks", 1);
+        }
+        let db_elapsed = t_db.elapsed();
+        println!("200 SQLite stat + attempt writes: {:?}", db_elapsed);
+        assert!(
+            db_elapsed.as_millis() < 100,
+            "200 DB writes must execute under 100ms"
+        );
+    }
 }

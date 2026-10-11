@@ -597,4 +597,136 @@ mod tests {
         let active_cells = board.cells.iter().filter(|c| c.active).count();
         assert_eq!(active_cells, 91);
     }
+
+    #[test]
+    fn test_no_flags_victory_condition() {
+        // Create 3x3 board with 1 mine at (2, 2)
+        let mut ruleset = Ruleset::classic_square(3, 3, 1);
+        ruleset.flag_policy = FlagPolicy::NoFlags;
+        let mut board = Board::from_ruleset(ruleset);
+        board.first_click = false;
+
+        // Manually place mine at (2, 2)
+        let m_idx = board.get_index(2, 2);
+        board.cells[m_idx].is_mine = true;
+
+        // Reveal all 8 safe cells without flagging
+        for y in 0..3 {
+            for x in 0..3 {
+                if !(x == 2 && y == 2) {
+                    board.reveal(x, y);
+                }
+            }
+        }
+
+        assert_eq!(
+            board.status,
+            GameStatus::Won,
+            "Board must detect victory when all safe cells revealed under NoFlags"
+        );
+        assert_eq!(board.flags_placed, 0, "No flags should have been placed");
+    }
+
+    #[test]
+    fn test_first_click_guaranteed_zero_opening() {
+        let mut ruleset = Ruleset::classic_square(9, 9, 10);
+        ruleset.first_click_policy = FirstClickPolicy::GuaranteedZeroOpening;
+        let mut board = Board::from_ruleset(ruleset);
+
+        board.reveal(4, 4);
+        assert!(!board.first_click);
+
+        let cell = board.get_cell(4, 4).unwrap();
+        assert_eq!(
+            cell.adjacent_mines, 0,
+            "Initial clicked cell must have 0 adjacent mines"
+        );
+        assert_eq!(cell.state, CellState::Revealed);
+
+        // All direct neighbors must be safe and revealed by flood
+        for (nx, ny) in board.neighbors(4, 4) {
+            let n_cell = board.get_cell(nx, ny).unwrap();
+            assert!(
+                !n_cell.is_mine,
+                "Neighbors must not be mines in GuaranteedZeroOpening"
+            );
+            assert_eq!(
+                n_cell.state,
+                CellState::Revealed,
+                "Zero opening must flood-reveal all neighbors"
+            );
+        }
+    }
+
+    #[test]
+    fn test_extended_ring2_clue_independent_oracle() {
+        // Construct 5x5 board
+        let mut ruleset = Ruleset::classic_square(5, 5, 0);
+        ruleset.clue_policy = CluePolicy::ExtendedRing2;
+        let mut board = Board::from_ruleset(ruleset);
+        board.first_click = false;
+
+        // Place mines at distance 1 and distance 2 from center (2, 2)
+        // Distance 1: (2, 1) and (3, 2) -> 2 adjacent mines
+        let idx_d1_a = board.get_index(2, 1);
+        let idx_d1_b = board.get_index(3, 2);
+        board.cells[idx_d1_a].is_mine = true;
+        board.cells[idx_d1_b].is_mine = true;
+
+        // Distance 2 (Ring 2): (0, 0), (4, 4), (2, 4) -> 3 ring-2 mines
+        let idx_r2_a = board.get_index(0, 0);
+        let idx_r2_b = board.get_index(4, 4);
+        let idx_r2_c = board.get_index(2, 4);
+        board.cells[idx_r2_a].is_mine = true;
+        board.cells[idx_r2_b].is_mine = true;
+        board.cells[idx_r2_c].is_mine = true;
+
+        // Recompute clues manually
+        let center_idx = board.get_index(2, 2);
+        board.cells[center_idx].clue_type = ClueType::Ring2;
+
+        let mut adj_count = 0;
+        for (nx, ny) in board.neighbors(2, 2) {
+            if board.cells[board.get_index(nx, ny)].is_mine {
+                adj_count += 1;
+            }
+        }
+        board.cells[center_idx].adjacent_mines = adj_count;
+
+        let mut r2_count = 0;
+        for (r2x, r2y) in board.ring2_neighbors(2, 2) {
+            if board.cells[board.get_index(r2x, r2y)].is_mine {
+                r2_count += 1;
+            }
+        }
+        board.cells[center_idx].ring2_mines = r2_count;
+
+        assert_eq!(
+            board.cells[center_idx].adjacent_mines, 2,
+            "Adjacent mines must equal 2"
+        );
+        assert_eq!(
+            board.cells[center_idx].ring2_mines, 3,
+            "Ring-2 mines must equal 3"
+        );
+    }
+
+    #[test]
+    fn test_loss_detection_and_reveal_mines() {
+        let mut board = Board::new_square(5, 5, 2);
+        board.first_click = false;
+        let m1 = board.get_index(1, 1);
+        let m2 = board.get_index(3, 3);
+        board.cells[m1].is_mine = true;
+        board.cells[m2].is_mine = true;
+
+        board.reveal(1, 1);
+        assert_eq!(board.status, GameStatus::Lost);
+        assert_eq!(board.cells[m1].state, CellState::Revealed);
+        assert_eq!(
+            board.cells[m2].state,
+            CellState::Revealed,
+            "All mines must be revealed upon defeat"
+        );
+    }
 }

@@ -221,6 +221,15 @@ impl Ruleset {
             }
         }
 
+        if self.logic_guarantee == LogicGuarantee::CertifiedNoGuess {
+            let total = self.total_active_cells();
+            if self.mine_count * 100 / total > 40 {
+                return Err(RulesetError::ContradictoryConfiguration(
+                    "Certified No Guess requires mine density <= 40%".into(),
+                ));
+            }
+        }
+
         Ok(())
     }
 
@@ -244,5 +253,105 @@ impl Ruleset {
             mods.push("Unassisted");
         }
         mods
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ruleset_validation_success() {
+        let rs = Ruleset::classic_square(9, 9, 10);
+        assert!(rs.validate().is_ok());
+
+        let hex_rs = Ruleset::classic_hex(4, 15);
+        assert!(hex_rs.validate().is_ok());
+    }
+
+    #[test]
+    fn test_ruleset_validation_zero_mines() {
+        let rs = Ruleset::classic_square(9, 9, 0);
+        assert_eq!(rs.validate().unwrap_err(), RulesetError::ZeroMines);
+    }
+
+    #[test]
+    fn test_ruleset_validation_invalid_dimensions() {
+        let rs = Ruleset::classic_square(2, 2, 1);
+        assert!(matches!(
+            rs.validate(),
+            Err(RulesetError::InvalidDimensions(_))
+        ));
+
+        let rs_too_big = Ruleset::classic_square(51, 10, 10);
+        assert!(matches!(
+            rs_too_big.validate(),
+            Err(RulesetError::InvalidDimensions(_))
+        ));
+
+        let hex_bad = Ruleset::classic_hex(1, 1);
+        assert!(matches!(
+            hex_bad.validate(),
+            Err(RulesetError::InvalidDimensions(_))
+        ));
+    }
+
+    #[test]
+    fn test_ruleset_validation_too_many_mines() {
+        let rs = Ruleset::classic_square(9, 9, 75);
+        assert!(matches!(rs.validate(), Err(RulesetError::TooManyMines(_))));
+
+        let hex_rs = Ruleset::classic_hex(2, 14);
+        assert!(matches!(
+            hex_rs.validate(),
+            Err(RulesetError::TooManyMines(_))
+        ));
+    }
+
+    #[test]
+    fn test_ruleset_validation_limited_flags() {
+        let mut rs = Ruleset::classic_square(9, 9, 10);
+        rs.flag_policy = FlagPolicy::LimitedFlags { max_flags: 0 };
+        assert!(matches!(
+            rs.validate(),
+            Err(RulesetError::InvalidFlagLimit(_))
+        ));
+
+        rs.flag_policy = FlagPolicy::LimitedFlags { max_flags: 25 };
+        assert!(matches!(
+            rs.validate(),
+            Err(RulesetError::InvalidFlagLimit(_))
+        ));
+
+        rs.flag_policy = FlagPolicy::LimitedFlags { max_flags: 10 };
+        assert!(rs.validate().is_ok());
+    }
+
+    #[test]
+    fn test_ruleset_validation_certified_no_guess_high_density() {
+        let mut rs = Ruleset::classic_square(9, 9, 36); // 36 / 81 = 44.4% density
+        rs.logic_guarantee = LogicGuarantee::CertifiedNoGuess;
+        assert!(matches!(
+            rs.validate(),
+            Err(RulesetError::ContradictoryConfiguration(_))
+        ));
+
+        rs.mine_count = 20; // 20 / 81 = 24.6% density
+        assert!(rs.validate().is_ok());
+    }
+
+    #[test]
+    fn test_ruleset_modifier_summary() {
+        let mut rs = Ruleset::classic_square(10, 10, 15);
+        rs.flag_policy = FlagPolicy::NoFlags;
+        rs.clue_policy = CluePolicy::ExtendedRing2;
+        rs.first_click_policy = FirstClickPolicy::GuaranteedZeroOpening;
+        rs.logic_guarantee = LogicGuarantee::CertifiedNoGuess;
+
+        let summary = rs.modifier_summary();
+        assert!(summary.contains(&"No Flags"));
+        assert!(summary.contains(&"Ring-2 Clues"));
+        assert!(summary.contains(&"Zero Opening"));
+        assert!(summary.contains(&"Certified No Guess"));
     }
 }

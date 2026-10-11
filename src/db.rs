@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct Profile {
     pub id: i64,
     pub display_name: String,
@@ -56,6 +57,7 @@ impl Database {
         Ok(Self { conn })
     }
 
+    #[allow(dead_code)]
     pub fn new_in_memory() -> Result<Self> {
         let mut conn = Connection::open_in_memory()?;
         Self::apply_migrations(&mut conn)?;
@@ -437,6 +439,7 @@ impl Database {
         Ok(res)
     }
 
+    #[allow(dead_code)]
     pub fn delete_custom_theme(&self, theme_id: &str) -> Result<()> {
         self.conn
             .execute("DELETE FROM custom_themes WHERE id = ?1", params![theme_id])?;

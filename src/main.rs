@@ -1083,6 +1083,11 @@ impl MineShiftApp {
                                 .into_iter()
                                 .find(|c| c.id == *chal_id)
                             {
+                                if let Some(ref prof) = self.active_profile {
+                                    if let Some(ref db) = self.db {
+                                        let _ = db.record_challenge_attempt(prof.id, chal_id);
+                                    }
+                                }
                                 self.board = Board::from_ruleset(ch.ruleset.clone());
                                 if let Some(t) = ch.target_time_sec {
                                     self.mode_state.time_limit_sec = Some(t);
@@ -3107,6 +3112,16 @@ impl MineShiftApp {
 
                                                         if ui.add(play_btn).clicked() {
                                                             self.audio.play(SoundEffect::UiClick);
+                                                            if let Some(ref prof) =
+                                                                self.active_profile
+                                                            {
+                                                                if let Some(ref db) = self.db {
+                                                                    let _ = db
+                                                                        .record_challenge_attempt(
+                                                                            prof.id, &c.id,
+                                                                        );
+                                                                }
+                                                            }
                                                             self.active_challenge_id =
                                                                 Some(c.id.clone());
                                                             self.active_hint = None;

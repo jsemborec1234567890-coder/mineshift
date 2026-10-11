@@ -17,7 +17,7 @@ pub struct Profile {
     pub total_xp: i64,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GameSession {
     pub profile_id: i64,
     pub mode: String,
@@ -29,6 +29,14 @@ pub struct GameSession {
     pub started_at: i64,
     pub duration_ms: i64,
     pub result: String, // "Won", "Lost"
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct ChallengeCompletion {
+    pub challenge_id: String,
+    pub completed_at: i64,
+    pub best_time_ms: i64,
+    pub attempts: i64,
 }
 
 pub struct Database {
@@ -145,6 +153,19 @@ impl Database {
             "CREATE TABLE IF NOT EXISTS profile_settings (
                 profile_id INTEGER PRIMARY KEY,
                 settings_json TEXT NOT NULL,
+                FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
+        tx.execute(
+            "CREATE TABLE IF NOT EXISTS challenge_completions (
+                profile_id INTEGER NOT NULL,
+                challenge_id TEXT NOT NULL,
+                completed_at INTEGER NOT NULL,
+                best_time_ms INTEGER NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (profile_id, challenge_id),
                 FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
             )",
             [],
@@ -524,5 +545,80 @@ impl Database {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn record_challenge_attempt(&self, profile_id: i64, challenge_id: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO challenge_completions (profile_id, challenge_id, completed_at, best_time_ms, attempts)
+             VALUES (?1, ?2, 0, 0, 1)
+             ON CONFLICT(profile_id, challenge_id) DO UPDATE SET
+             attempts = attempts + 1",
+            params![profile_id, challenge_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_challenge_completion(
+        &self,
+        profile_id: i64,
+        challenge_id: &str,
+        duration_ms: i64,
+        xp_reward: i64,
+    ) -> Result<bool> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let previously_completed: bool = self
+            .conn
+            .query_row(
+                "SELECT completed_at > 0 FROM challenge_completions WHERE profile_id = ?1 AND challenge_id = ?2",
+                params![profile_id, challenge_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        self.conn.execute(
+            "INSERT INTO challenge_completions (profile_id, challenge_id, completed_at, best_time_ms, attempts)
+             VALUES (?1, ?2, ?3, ?4, 1)
+             ON CONFLICT(profile_id, challenge_id) DO UPDATE SET
+             completed_at = CASE WHEN completed_at == 0 THEN excluded.completed_at ELSE completed_at END,
+             best_time_ms = CASE WHEN best_time_ms == 0 OR excluded.best_time_ms < best_time_ms THEN excluded.best_time_ms ELSE best_time_ms END,
+             attempts = attempts + 1",
+            params![profile_id, challenge_id, now, duration_ms],
+        )?;
+
+        if !previously_completed {
+            let _ = self.add_xp(profile_id, xp_reward);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub fn get_challenge_completions(
+        &self,
+        profile_id: i64,
+    ) -> Result<std::collections::HashMap<String, ChallengeCompletion>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT challenge_id, completed_at, best_time_ms, attempts
+             FROM challenge_completions WHERE profile_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![profile_id], |row| {
+            Ok(ChallengeCompletion {
+                challenge_id: row.get(0)?,
+                completed_at: row.get(1)?,
+                best_time_ms: row.get(2)?,
+                attempts: row.get(3)?,
+            })
+        })?;
+
+        let mut map = std::collections::HashMap::new();
+        for r in rows {
+            let c = r?;
+            map.insert(c.challenge_id.clone(), c);
+        }
+        Ok(map)
     }
 }

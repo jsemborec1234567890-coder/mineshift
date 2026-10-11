@@ -399,4 +399,104 @@ mod tests {
         assert_eq!(buf.len(), 54 + 400);
         assert_eq!(&buf[0..2], b"BM");
     }
+
+    #[test]
+    fn test_mastery_challenge_catalog_validity() {
+        use minecore::challenge::MasteryChallenge;
+        let catalog = MasteryChallenge::catalog();
+        assert_eq!(
+            catalog.len(),
+            11,
+            "Catalog should have 11 mastery challenges across 5 tiers"
+        );
+
+        for c in &catalog {
+            assert!(!c.id.is_empty(), "Challenge ID cannot be empty");
+            assert!(!c.title.is_empty(), "Challenge title cannot be empty");
+            assert!(
+                !c.description.is_empty(),
+                "Challenge description cannot be empty"
+            );
+            assert!(c.xp_reward > 0, "Challenge XP reward must be positive");
+            assert!(
+                c.ruleset.mine_count > 0,
+                "Challenge mine count must be positive"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cli_args_mastery_and_sandbox_routing() {
+        use crate::{AppScreen, MineShiftApp};
+        let mut app = MineShiftApp::new();
+
+        app.apply_cli_args(&[
+            "mineshift".to_string(),
+            "--screen".to_string(),
+            "mastery".to_string(),
+        ]);
+        assert!(matches!(app.screen, AppScreen::MasteryChallenges));
+
+        app.apply_cli_args(&[
+            "mineshift".to_string(),
+            "--screen".to_string(),
+            "sandbox".to_string(),
+        ]);
+        assert!(matches!(app.screen, AppScreen::SandboxLab));
+
+        app.apply_cli_args(&[
+            "mineshift".to_string(),
+            "--challenge".to_string(),
+            "chal_noflag_beg".to_string(),
+        ]);
+        assert!(matches!(app.screen, AppScreen::Gameplay));
+        assert_eq!(app.active_challenge_id, Some("chal_noflag_beg".to_string()));
+        assert_eq!(
+            app.board.ruleset.flag_policy,
+            minecore::rules::FlagPolicy::NoFlags
+        );
+
+        app.apply_cli_args(&[
+            "mineshift".to_string(),
+            "--clue-policy".to_string(),
+            "ring2".to_string(),
+        ]);
+        assert_eq!(
+            app.board.ruleset.clue_policy,
+            minecore::rules::CluePolicy::ExtendedRing2
+        );
+    }
+
+    #[test]
+    fn test_challenge_persistence_idempotency() {
+        use crate::db::Database;
+        let db = Database::new_in_memory().unwrap();
+        let pid = db.create_profile("Challenger", "🤖").unwrap();
+
+        // First win awards XP
+        let first_win = db
+            .record_challenge_completion(pid, "chal_noflag_beg", 45000, 75)
+            .unwrap();
+        assert!(first_win, "First win must return true and award XP");
+
+        let profs = db.get_profiles().unwrap();
+        let p = profs.into_iter().find(|p| p.id == pid).unwrap();
+        assert_eq!(p.total_xp, 75);
+
+        // Second faster win updates best time but does NOT double-award XP
+        let second_win = db
+            .record_challenge_completion(pid, "chal_noflag_beg", 38000, 75)
+            .unwrap();
+        assert!(!second_win, "Subsequent win must return false for XP award");
+
+        let profs = db.get_profiles().unwrap();
+        let p = profs.into_iter().find(|p| p.id == pid).unwrap();
+        assert_eq!(p.total_xp, 75, "Total XP should not be double-awarded");
+
+        let completions = db.get_challenge_completions(pid).unwrap();
+        assert_eq!(completions.len(), 1);
+        let c = completions.get("chal_noflag_beg").unwrap();
+        assert_eq!(c.best_time_ms, 38000);
+        assert_eq!(c.attempts, 2);
+    }
 }

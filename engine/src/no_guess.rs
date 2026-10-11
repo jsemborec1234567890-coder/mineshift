@@ -1,6 +1,5 @@
 use crate::board::{Board, CellState};
 use crate::solver::{Deduction, Solver};
-use rand::Rng;
 
 pub fn generate_no_guess_board(mut board: Board, safe_x: usize, safe_y: usize) -> Option<Board> {
     let max_retries = 100;
@@ -66,4 +65,29 @@ pub fn generate_no_guess_board(mut board: Board, safe_x: usize, safe_y: usize) -
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_no_guess_square() {
+        let board = Board::new_square(6, 6, 4);
+        let solved = generate_no_guess_board(board, 2, 2);
+        assert!(
+            solved.is_some(),
+            "Should generate a valid no-guess square board"
+        );
+    }
+
+    #[test]
+    fn test_generate_no_guess_hex() {
+        let board = Board::new_hex(2, 3);
+        let solved = generate_no_guess_board(board, 2, 2);
+        assert!(
+            solved.is_some(),
+            "Should generate a valid no-guess hex board"
+        );
+    }
 }

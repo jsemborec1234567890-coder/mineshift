@@ -1,25 +1,40 @@
-use rand::Rng;
-use std::collections::VecDeque;
+use crate::rules::{CluePolicy, FirstClickPolicy, FlagPolicy, Ruleset};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashSet, VecDeque};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum CellState {
     Covered,
     Revealed,
     Flagged,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Geometry {
     Square,
     Hex,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum ClueType {
+    StandardAdjacent,
+    Ring2,
+}
+
+impl Default for ClueType {
+    fn default() -> Self {
+        Self::StandardAdjacent
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Cell {
     pub active: bool,
     pub is_mine: bool,
     pub state: CellState,
     pub adjacent_mines: u8,
+    pub clue_type: ClueType,
+    pub ring2_mines: u8,
 }
 
 impl Default for Cell {
@@ -29,18 +44,20 @@ impl Default for Cell {
             is_mine: false,
             state: CellState::Covered,
             adjacent_mines: 0,
+            clue_type: ClueType::StandardAdjacent,
+            ring2_mines: 0,
         }
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
 pub enum GameStatus {
     Playing,
     Won,
     Lost,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Board {
     pub geometry: Geometry,
     pub radius: usize,
@@ -53,12 +70,16 @@ pub struct Board {
     pub is_no_guess: bool,
     pub seed: Option<u64>,
     pub flags_placed: usize,
+    pub ruleset: Ruleset,
+    #[serde(skip)]
     pub start_time: Option<std::time::Instant>,
+    #[serde(skip)]
     pub end_time: Option<std::time::Instant>,
 }
 
 impl Board {
     pub fn new_square(width: usize, height: usize, mine_count: usize) -> Self {
+        let ruleset = Ruleset::classic_square(width, height, mine_count);
         Self {
             geometry: Geometry::Square,
             radius: 0,
@@ -71,6 +92,7 @@ impl Board {
             is_no_guess: false,
             seed: None,
             flags_placed: 0,
+            ruleset,
             start_time: None,
             end_time: None,
         }
@@ -91,6 +113,7 @@ impl Board {
             }
         }
 
+        let ruleset = Ruleset::classic_hex(radius, mine_count);
         Self {
             geometry: Geometry::Hex,
             radius,
@@ -103,9 +126,21 @@ impl Board {
             is_no_guess: false,
             seed: None,
             flags_placed: 0,
+            ruleset,
             start_time: None,
             end_time: None,
         }
+    }
+
+    pub fn from_ruleset(ruleset: Ruleset) -> Self {
+        let mut board = match ruleset.topology {
+            Geometry::Square => Self::new_square(ruleset.width, ruleset.height, ruleset.mine_count),
+            Geometry::Hex => Self::new_hex(ruleset.radius, ruleset.mine_count),
+        };
+        board.is_no_guess =
+            ruleset.logic_guarantee == crate::rules::LogicGuarantee::CertifiedNoGuess;
+        board.ruleset = ruleset;
+        board
     }
 
     pub fn get_index(&self, x: usize, y: usize) -> usize {
@@ -158,15 +193,55 @@ impl Board {
             .collect()
     }
 
+    pub fn ring2_neighbors(&self, x: usize, y: usize) -> Vec<(usize, usize)> {
+        let d1 = self.neighbors(x, y);
+        let mut d1_set: HashSet<(usize, usize)> = d1.iter().copied().collect();
+        d1_set.insert((x, y));
+
+        let mut ring2 = HashSet::new();
+        for &(nx, ny) in &d1 {
+            for (nnx, nny) in self.neighbors(nx, ny) {
+                if !d1_set.contains(&(nnx, nny)) {
+                    ring2.insert((nnx, nny));
+                }
+            }
+        }
+        let mut result: Vec<(usize, usize)> = ring2.into_iter().collect();
+        result.sort_unstable();
+        result
+    }
+
+    pub fn can_flag(&self) -> bool {
+        match self.ruleset.flag_policy {
+            FlagPolicy::NoFlags => false,
+            FlagPolicy::LimitedFlags { max_flags } => self.flags_placed < max_flags,
+            FlagPolicy::Standard => true,
+        }
+    }
+
+    pub fn remaining_flags(&self) -> Option<usize> {
+        match self.ruleset.flag_policy {
+            FlagPolicy::NoFlags => Some(0),
+            FlagPolicy::LimitedFlags { max_flags } => {
+                Some(max_flags.saturating_sub(self.flags_placed))
+            }
+            FlagPolicy::Standard => None,
+        }
+    }
+
     fn place_mines(&mut self, safe_x: usize, safe_y: usize) {
         use rand::{Rng, SeedableRng};
         let mut mines_placed = 0;
 
-        let safe_zone: Vec<(usize, usize)> = self
-            .neighbors(safe_x, safe_y)
-            .into_iter()
-            .chain(std::iter::once((safe_x, safe_y)))
-            .collect();
+        let safe_zone: Vec<(usize, usize)> = match self.ruleset.first_click_policy {
+            FirstClickPolicy::StandardSafe => vec![(safe_x, safe_y)],
+            FirstClickPolicy::GuaranteedZeroOpening
+            | FirstClickPolicy::ValidatedDeductionOpening => self
+                .neighbors(safe_x, safe_y)
+                .into_iter()
+                .chain(std::iter::once((safe_x, safe_y)))
+                .collect(),
+        };
 
         if let Some(s) = self.seed {
             let mut rng = rand::rngs::StdRng::seed_from_u64(s);
@@ -202,11 +277,11 @@ impl Board {
             }
         }
 
-        // Compute adjacent mines
+        // Compute adjacent mines and ring-2 mines
         for y in 0..self.height {
             for x in 0..self.width {
                 let idx = self.get_index(x, y);
-                if self.cells[idx].is_mine {
+                if !self.cells[idx].active || self.cells[idx].is_mine {
                     continue;
                 }
 
@@ -218,6 +293,23 @@ impl Board {
                     }
                 }
                 self.cells[idx].adjacent_mines = count;
+
+                let mut r2_count = 0;
+                for (r2x, r2y) in self.ring2_neighbors(x, y) {
+                    let n_idx = self.get_index(r2x, r2y);
+                    if self.cells[n_idx].is_mine {
+                        r2_count += 1;
+                    }
+                }
+                self.cells[idx].ring2_mines = r2_count;
+
+                // Configure Ring-2 Clue cells if extended clue policy is enabled
+                if self.ruleset.clue_policy == CluePolicy::ExtendedRing2 {
+                    // Mark roughly 25% of positive clue cells deterministically as Ring2
+                    if count > 0 && (x * 7 + y * 13) % 4 == 0 {
+                        self.cells[idx].clue_type = ClueType::Ring2;
+                    }
+                }
             }
         }
     }
@@ -264,6 +356,11 @@ impl Board {
             return;
         }
 
+        // Flag-dependent chording is disabled under NoFlags policy
+        if self.ruleset.flag_policy == FlagPolicy::NoFlags {
+            return;
+        }
+
         let cell = match self.get_cell(x, y) {
             Some(c) => c,
             None => return,
@@ -299,12 +396,15 @@ impl Board {
         let idx = self.get_index(x, y);
         match self.cells[idx].state {
             CellState::Covered => {
+                if !self.can_flag() {
+                    return;
+                }
                 self.cells[idx].state = CellState::Flagged;
                 self.flags_placed += 1;
             }
             CellState::Flagged => {
                 self.cells[idx].state = CellState::Covered;
-                self.flags_placed -= 1;
+                self.flags_placed = self.flags_placed.saturating_sub(1);
             }
             _ => {}
         }
@@ -396,54 +496,105 @@ mod tests {
         assert_eq!(cell.state, CellState::Covered);
         assert_eq!(board.flags_placed, 0);
     }
-}
 
-#[test]
-fn test_chording() {
-    let mut board = Board::new_square(9, 9, 0); // No random mines
-    board.first_click = false;
+    #[test]
+    fn test_no_flags_policy() {
+        let mut ruleset = Ruleset::classic_square(9, 9, 10);
+        ruleset.flag_policy = FlagPolicy::NoFlags;
+        let mut board = Board::from_ruleset(ruleset);
 
-    // Manually place a mine and numbers
-    let idx1 = board.get_index(1, 1);
-    board.cells[idx1].is_mine = true;
-    let idx2 = board.get_index(0, 1);
-    board.cells[idx2].adjacent_mines = 1;
+        assert!(!board.can_flag());
+        assert_eq!(board.remaining_flags(), Some(0));
 
-    // Reveal 0,1
-    board.reveal(0, 1);
-    assert_eq!(
-        board.cells[board.get_index(0, 1)].state,
-        CellState::Revealed
-    );
+        board.toggle_flag(1, 1);
+        assert_eq!(board.cells[board.get_index(1, 1)].state, CellState::Covered);
+        assert_eq!(board.flags_placed, 0);
+    }
 
-    // Try chording before flagging (should do nothing)
-    board.chord(0, 1);
-    assert_eq!(board.cells[board.get_index(0, 0)].state, CellState::Covered);
+    #[test]
+    fn test_limited_flags_policy() {
+        let mut ruleset = Ruleset::classic_square(9, 9, 10);
+        ruleset.flag_policy = FlagPolicy::LimitedFlags { max_flags: 2 };
+        let mut board = Board::from_ruleset(ruleset);
 
-    // Flag the mine
-    board.toggle_flag(1, 1);
+        assert!(board.can_flag());
+        assert_eq!(board.remaining_flags(), Some(2));
 
-    // Chord again (should reveal surrounding safe cells)
-    board.chord(0, 1);
-    assert_eq!(
-        board.cells[board.get_index(0, 0)].state,
-        CellState::Revealed
-    );
-    assert_eq!(
-        board.cells[board.get_index(0, 2)].state,
-        CellState::Revealed
-    );
-}
+        board.toggle_flag(0, 0);
+        assert_eq!(board.flags_placed, 1);
+        assert_eq!(board.remaining_flags(), Some(1));
 
-#[test]
-fn test_hex_initialization() {
-    let board = Board::new_hex(5, 10);
-    assert_eq!(board.geometry, Geometry::Hex);
-    assert_eq!(board.radius, 5);
-    assert_eq!(board.mine_count, 10);
+        board.toggle_flag(0, 1);
+        assert_eq!(board.flags_placed, 2);
+        assert_eq!(board.remaining_flags(), Some(0));
+        assert!(!board.can_flag());
 
-    // Hex grid with radius R has 3*R*(R+1) + 1 cells.
-    // For R=5, that is 3*5*6 + 1 = 91 active cells.
-    let active_cells = board.cells.iter().filter(|c| c.active).count();
-    assert_eq!(active_cells, 91);
+        // Attempting to place a 3rd flag is rejected
+        board.toggle_flag(0, 2);
+        assert_eq!(board.cells[board.get_index(0, 2)].state, CellState::Covered);
+        assert_eq!(board.flags_placed, 2);
+
+        // Removing a flag restores capacity
+        board.toggle_flag(0, 1);
+        assert_eq!(board.flags_placed, 1);
+        assert!(board.can_flag());
+        assert_eq!(board.remaining_flags(), Some(1));
+    }
+
+    #[test]
+    fn test_ring2_neighbors_square_and_hex() {
+        let sq_board = Board::new_square(5, 5, 0);
+        // Center cell (2, 2) in a 5x5 square has 8 direct neighbors and 16 ring-2 neighbors
+        let sq_r2 = sq_board.ring2_neighbors(2, 2);
+        assert_eq!(sq_r2.len(), 16);
+
+        let hex_board = Board::new_hex(3, 0);
+        // Center cell of hex board is at (3, 3) in array representation.
+        // Direct neighbors: 6. Ring-2 neighbors: 12.
+        let hex_r2 = hex_board.ring2_neighbors(3, 3);
+        assert_eq!(hex_r2.len(), 12);
+    }
+
+    #[test]
+    fn test_chording() {
+        let mut board = Board::new_square(9, 9, 0);
+        board.first_click = false;
+
+        let idx1 = board.get_index(1, 1);
+        board.cells[idx1].is_mine = true;
+        let idx2 = board.get_index(0, 1);
+        board.cells[idx2].adjacent_mines = 1;
+
+        board.reveal(0, 1);
+        assert_eq!(
+            board.cells[board.get_index(0, 1)].state,
+            CellState::Revealed
+        );
+
+        // Chord before flagging does nothing
+        board.chord(0, 1);
+        assert_eq!(board.cells[board.get_index(0, 0)].state, CellState::Covered);
+
+        board.toggle_flag(1, 1);
+        board.chord(0, 1);
+        assert_eq!(
+            board.cells[board.get_index(0, 0)].state,
+            CellState::Revealed
+        );
+        assert_eq!(
+            board.cells[board.get_index(0, 2)].state,
+            CellState::Revealed
+        );
+    }
+
+    #[test]
+    fn test_hex_initialization() {
+        let board = Board::new_hex(5, 10);
+        assert_eq!(board.geometry, Geometry::Hex);
+        assert_eq!(board.radius, 5);
+        assert_eq!(board.mine_count, 10);
+
+        let active_cells = board.cells.iter().filter(|c| c.active).count();
+        assert_eq!(active_cells, 91);
+    }
 }

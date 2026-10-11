@@ -13,7 +13,12 @@ use audio::SoundEffect;
 
 use eframe::egui;
 use minecore::board::{Board, CellState, GameStatus};
+use minecore::challenge::{ChallengeTier, MasteryChallenge};
 use minecore::mode;
+use minecore::rules::{
+    AssistPolicy, CluePolicy, FirstClickPolicy, FlagPolicy, LogicGuarantee, Ruleset,
+};
+use minecore::solver::{DeductionType, Explanation, Solver};
 
 fn configure_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
@@ -97,6 +102,8 @@ enum AppScreen {
     Statistics,
     Achievements,
     GameModes,
+    MasteryChallenges,
+    SandboxLab,
     GeneratingNoGuess,
     ThemeStudio,
     ProfileCosmetics,
@@ -164,6 +171,21 @@ struct MineShiftApp {
     last_frame_time: f64,
     screenshot_target: Option<String>,
     frame_counter: u32,
+    challenge_tier_filter: Option<ChallengeTier>,
+    active_challenge_id: Option<String>,
+    challenge_completions: std::collections::HashMap<String, db::ChallengeCompletion>,
+    active_hint: Option<Explanation>,
+    sandbox_geometry: minecore::board::Geometry,
+    sandbox_width: usize,
+    sandbox_height: usize,
+    sandbox_radius: usize,
+    sandbox_mines: usize,
+    sandbox_opening_policy: FirstClickPolicy,
+    sandbox_flag_policy: FlagPolicy,
+    sandbox_clue_policy: CluePolicy,
+    sandbox_logic_guarantee: LogicGuarantee,
+    blitz_combo: u32,
+    blitz_last_reveal_time: f64,
 }
 
 impl MineShiftApp {
@@ -288,9 +310,29 @@ impl MineShiftApp {
             last_frame_time: 0.0,
             screenshot_target: None,
             frame_counter: 0,
+            challenge_tier_filter: None,
+            active_challenge_id: None,
+            challenge_completions: std::collections::HashMap::new(),
+            active_hint: None,
+            sandbox_geometry: minecore::board::Geometry::Square,
+            sandbox_width: 16,
+            sandbox_height: 16,
+            sandbox_radius: 6,
+            sandbox_mines: 40,
+            sandbox_opening_policy: FirstClickPolicy::GuaranteedZeroOpening,
+            sandbox_flag_policy: FlagPolicy::Standard,
+            sandbox_clue_policy: CluePolicy::StandardOnly,
+            sandbox_logic_guarantee: LogicGuarantee::StandardProbabilistic,
+            blitz_combo: 0,
+            blitz_last_reveal_time: 0.0,
         };
         app.load_profile_settings();
         app.apply_profile_theme();
+        if let (Some(prof), Some(db)) = (&app.active_profile, &app.db) {
+            if let Ok(comps) = db.get_challenge_completions(prof.id) {
+                app.challenge_completions = comps;
+            }
+        }
         app
     }
 
@@ -346,6 +388,12 @@ impl MineShiftApp {
                             }
                             "themestudio" | "theme-studio" | "customize" => {
                                 self.screen = AppScreen::ThemeStudio;
+                            }
+                            "mastery" | "mastery-challenges" | "challenges" => {
+                                self.screen = AppScreen::MasteryChallenges;
+                            }
+                            "sandbox" | "sandbox-lab" => {
+                                self.screen = AppScreen::SandboxLab;
                             }
                             "gameplay" | "gameplay-square" => {
                                 self.screen = AppScreen::Gameplay;
@@ -498,6 +546,74 @@ impl MineShiftApp {
                         self.screenshot_target = Some(args[i].clone());
                     }
                 }
+                "--challenge" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        let chal_id = args[i].clone();
+                        if let Some(ch) = MasteryChallenge::catalog()
+                            .into_iter()
+                            .find(|c| c.id == chal_id)
+                        {
+                            self.active_challenge_id = Some(ch.id.clone());
+                            self.board = Board::from_ruleset(ch.ruleset.clone());
+                            self.mode_state = mode::ModeState::new(mode::GameModeId::Classic);
+                            if let Some(t) = ch.target_time_sec {
+                                self.mode_state.time_limit_sec = Some(t);
+                            }
+                            self.screen = AppScreen::Gameplay;
+                        }
+                    }
+                }
+                "--clue-policy" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        if args[i] == "ring2" || args[i] == "extended" {
+                            self.board.ruleset.clue_policy = CluePolicy::ExtendedRing2;
+                        }
+                    }
+                }
+                "--flag-policy" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        if args[i] == "no-flags" || args[i] == "noflags" {
+                            self.board.ruleset.flag_policy = FlagPolicy::NoFlags;
+                        } else if args[i].starts_with("limited:") {
+                            if let Ok(limit) = args[i]["limited:".len()..].parse::<usize>() {
+                                self.board.ruleset.flag_policy =
+                                    FlagPolicy::LimitedFlags { max_flags: limit };
+                            }
+                        }
+                    }
+                }
+                "--opening-policy" => {
+                    if i + 1 < args.len() {
+                        i += 1;
+                        match args[i].as_str() {
+                            "zero" => {
+                                self.board.ruleset.first_click_policy =
+                                    FirstClickPolicy::GuaranteedZeroOpening
+                            }
+                            "deduction" => {
+                                self.board.ruleset.first_click_policy =
+                                    FirstClickPolicy::ValidatedDeductionOpening
+                            }
+                            "standard" => {
+                                self.board.ruleset.first_click_policy =
+                                    FirstClickPolicy::StandardSafe
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                "--hint" => {
+                    self.active_hint = Some(minecore::solver::Explanation {
+                        conclusion: minecore::solver::Deduction::Safe(1, 1),
+                        deduction_type: minecore::solver::DeductionType::SubsetSafe,
+                        applicable_clues: vec![(1, 0), (2, 0)],
+                        relevant_unknowns: vec![(1, 1)],
+                        explanation_text: "1-1 Reduction Pattern: Cell (1, 1) is guaranteed safe by subset constraint between adjacent clues.".to_string(),
+                    });
+                }
                 _ => {}
             }
             i += 1;
@@ -580,6 +696,29 @@ impl MineShiftApp {
             if ui.add(customize_btn).clicked() {
                 self.audio.play(SoundEffect::UiClick);
                 self.screen = AppScreen::ThemeStudio;
+            }
+
+            ui.add_space(12.0);
+
+            let chal_btn = egui::Button::new(
+                egui::RichText::new("🏆 MASTERY CHALLENGES")
+                    .size(19.0)
+                    .strong()
+                    .color(accent),
+            )
+            .fill(card_bg)
+            .stroke(egui::Stroke::new(1.5, accent))
+            .corner_radius(10.0)
+            .min_size(egui::vec2(400.0, 52.0));
+
+            if ui.add(chal_btn).clicked() {
+                self.audio.play(SoundEffect::UiClick);
+                if let (Some(prof), Some(db)) = (&self.active_profile, &self.db) {
+                    if let Ok(comps) = db.get_challenge_completions(prof.id) {
+                        self.challenge_completions = comps;
+                    }
+                }
+                self.screen = AppScreen::MasteryChallenges;
             }
 
             ui.add_space(12.0);
@@ -709,6 +848,123 @@ impl MineShiftApp {
                         );
                     });
 
+                // Active Challenge Badge
+                if let Some(ref chal_id) = self.active_challenge_id {
+                    let title = MasteryChallenge::catalog()
+                        .into_iter()
+                        .find(|c| c.id == *chal_id)
+                        .map(|c| c.title)
+                        .unwrap_or_else(|| "Challenge".to_string());
+                    ui.add_space(8.0);
+                    egui::Frame::new()
+                        .fill(accent.linear_multiply(0.2))
+                        .corner_radius(6.0)
+                        .stroke(egui::Stroke::new(1.0, accent))
+                        .inner_margin(egui::vec2(10.0, 6.0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(format!("🏆 {}", title))
+                                    .size(13.0)
+                                    .strong()
+                                    .color(accent),
+                            );
+                        });
+                }
+
+                // Active Modifier Badges
+                match self.board.ruleset.flag_policy {
+                    FlagPolicy::NoFlags => {
+                        ui.add_space(8.0);
+                        egui::Frame::new()
+                            .fill(danger.linear_multiply(0.2))
+                            .corner_radius(6.0)
+                            .stroke(egui::Stroke::new(1.0, danger))
+                            .inner_margin(egui::vec2(8.0, 5.0))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new("🚫 NO FLAGS")
+                                        .size(12.0)
+                                        .strong()
+                                        .color(danger),
+                                );
+                            });
+                    }
+                    FlagPolicy::LimitedFlags { max_flags } => {
+                        ui.add_space(8.0);
+                        egui::Frame::new()
+                            .fill(card_bg)
+                            .corner_radius(6.0)
+                            .stroke(egui::Stroke::new(1.0, border))
+                            .inner_margin(egui::vec2(8.0, 5.0))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "🚩 LIMITED: {}/{}",
+                                        self.board.flags_placed, max_flags
+                                    ))
+                                    .size(12.0)
+                                    .strong()
+                                    .color(accent),
+                                );
+                            });
+                    }
+                    FlagPolicy::Standard => {}
+                }
+
+                if self.board.ruleset.clue_policy == CluePolicy::ExtendedRing2 {
+                    ui.add_space(8.0);
+                    egui::Frame::new()
+                        .fill(card_bg)
+                        .corner_radius(6.0)
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            egui::Color32::from_rgb(140, 100, 240),
+                        ))
+                        .inner_margin(egui::vec2(8.0, 5.0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new("🔵 RING-2 CLUES")
+                                    .size(12.0)
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(160, 110, 255)),
+                            );
+                        });
+                }
+
+                if self.board.is_no_guess {
+                    ui.add_space(8.0);
+                    egui::Frame::new()
+                        .fill(card_bg)
+                        .corner_radius(6.0)
+                        .stroke(egui::Stroke::new(1.0, success))
+                        .inner_margin(egui::vec2(8.0, 5.0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new("✓ NO GUESS")
+                                    .size(12.0)
+                                    .strong()
+                                    .color(success),
+                            );
+                        });
+                }
+
+                if self.blitz_combo > 1 {
+                    ui.add_space(8.0);
+                    egui::Frame::new()
+                        .fill(accent.linear_multiply(0.25))
+                        .corner_radius(6.0)
+                        .stroke(egui::Stroke::new(1.0, accent))
+                        .inner_margin(egui::vec2(8.0, 5.0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(format!("🔥 ×{} COMBO", self.blitz_combo))
+                                    .size(12.0)
+                                    .strong()
+                                    .color(accent),
+                            );
+                        });
+                }
+
                 ui.add_space(16.0);
 
                 let elapsed = if let Some(end) = self.board.end_time {
@@ -820,20 +1076,37 @@ impl MineShiftApp {
                     if ui.add(restart_btn).clicked() {
                         self.audio.play(SoundEffect::UiClick);
                         self.anim_tracker.clear();
-                        self.board = match self.board.geometry {
-                            minecore::board::Geometry::Square => Board::new_square(
-                                self.board.width,
-                                self.board.height,
-                                self.board.mine_count,
-                            ),
-                            minecore::board::Geometry::Hex => {
-                                Board::new_hex(self.board.radius, self.board.mine_count)
+                        self.active_hint = None;
+                        self.blitz_combo = 0;
+                        if let Some(ref chal_id) = self.active_challenge_id {
+                            if let Some(ch) = MasteryChallenge::catalog()
+                                .into_iter()
+                                .find(|c| c.id == *chal_id)
+                            {
+                                self.board = Board::from_ruleset(ch.ruleset.clone());
+                                if let Some(t) = ch.target_time_sec {
+                                    self.mode_state.time_limit_sec = Some(t);
+                                }
                             }
-                        };
-                        self.board.is_no_guess = self.mode_state.id == mode::GameModeId::NoGuess;
+                        } else {
+                            self.board = match self.board.geometry {
+                                minecore::board::Geometry::Square => Board::new_square(
+                                    self.board.width,
+                                    self.board.height,
+                                    self.board.mine_count,
+                                ),
+                                minecore::board::Geometry::Hex => {
+                                    Board::new_hex(self.board.radius, self.board.mine_count)
+                                }
+                            };
+                            self.board.is_no_guess =
+                                self.mode_state.id == mode::GameModeId::NoGuess;
+                        }
                     }
 
-                    if self.mode_state.id == mode::GameModeId::Zen
+                    if (self.mode_state.id == mode::GameModeId::Zen
+                        || self.mode_state.id == mode::GameModeId::Sandbox
+                        || self.board.ruleset.assist_policy != AssistPolicy::Disallowed)
                         && self.board.status == GameStatus::Playing
                     {
                         let hint_btn = egui::Button::new(
@@ -846,24 +1119,77 @@ impl MineShiftApp {
 
                         if ui.add(hint_btn).clicked() {
                             self.audio.play(SoundEffect::UiClick);
-                            let deductions = minecore::solver::Solver::deduce(&self.board);
-                            for d in deductions {
-                                match d {
-                                    minecore::solver::Deduction::Safe(x, y) => {
-                                        let idx = self.board.get_index(x, y);
-                                        self.board.cells[idx].state = CellState::Revealed;
-                                    }
-                                    minecore::solver::Deduction::Mine(x, y) => {
-                                        let idx = self.board.get_index(x, y);
-                                        self.board.cells[idx].state = CellState::Flagged;
-                                    }
-                                }
+                            if let Some(exp) = Solver::explain_step(&self.board) {
+                                self.active_hint = Some(exp);
                             }
                         }
                     }
                 });
             });
         });
+
+        if let Some(ref hint) = self.active_hint {
+            ui.add_space(8.0);
+            let deduction_label = match hint.deduction_type {
+                DeductionType::DirectSafe => "Direct Safe",
+                DeductionType::DirectMine => "Direct Mine",
+                DeductionType::SubsetSafe => "Subset Safe",
+                DeductionType::SubsetMine => "Subset Mine",
+                DeductionType::Ring2Constraint => "Ring-2 Constraint",
+                DeductionType::OverlappingConstraint => "Overlapping Constraint",
+            };
+            let is_mine = !hint.conclusion.is_safe();
+            let coords = hint.conclusion.coords();
+            let badge_color = if is_mine { danger } else { success };
+
+            egui::Frame::new()
+                .fill(card_bg)
+                .corner_radius(8.0)
+                .stroke(egui::Stroke::new(1.5, accent))
+                .inner_margin(egui::vec2(14.0, 8.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("💡 LOGIC EXPLANATION")
+                                .size(14.0)
+                                .strong()
+                                .color(accent),
+                        );
+                        ui.add_space(6.0);
+                        egui::Frame::new()
+                            .fill(badge_color)
+                            .corner_radius(4.0)
+                            .inner_margin(egui::vec2(6.0, 2.0))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new(deduction_label)
+                                        .size(11.0)
+                                        .strong()
+                                        .color(egui::Color32::WHITE),
+                                );
+                            });
+                        ui.add_space(6.0);
+                        let target_text = format!(
+                            "Cell ({}, {}) is {}",
+                            coords.0,
+                            coords.1,
+                            if is_mine { "a MINE 🚩" } else { "SAFE 🟢" }
+                        );
+                        ui.label(
+                            egui::RichText::new(target_text)
+                                .size(14.0)
+                                .strong()
+                                .color(text_primary),
+                        );
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(format!("— {}", hint.explanation_text))
+                                .size(13.0)
+                                .color(text_muted),
+                        );
+                    });
+                });
+        }
     }
 
     fn show_gameplay(&mut self, ui: &mut egui::Ui) {
@@ -1018,6 +1344,15 @@ impl MineShiftApp {
                                     egui::StrokeKind::Inside,
                                 );
                             }
+                            if cell.clue_type == minecore::board::ClueType::Ring2 {
+                                let inner_rect = cell_rect.shrink(3.0);
+                                ui.painter().rect_stroke(
+                                    inner_rect,
+                                    self.theme.geometry.square_radius.max(2.0),
+                                    egui::Stroke::new(1.5, egui::Color32::from_rgb(140, 100, 240)),
+                                    egui::StrokeKind::Inside,
+                                );
+                            }
                         }
                         minecore::board::Geometry::Hex => {
                             let points = coords::hex_vertices(center, draw_cell_size * 0.95);
@@ -1035,11 +1370,19 @@ impl MineShiftApp {
                             ));
                             if self.theme.geometry.border_thickness > 0.0 {
                                 ui.painter().add(egui::Shape::closed_line(
-                                    points,
+                                    points.clone(),
                                     egui::Stroke::new(
                                         self.theme.geometry.border_thickness,
                                         self.theme.colors.border(),
                                     ),
+                                ));
+                            }
+                            if cell.clue_type == minecore::board::ClueType::Ring2 {
+                                let inner_points =
+                                    coords::hex_vertices(center, draw_cell_size * 0.78);
+                                ui.painter().add(egui::Shape::closed_line(
+                                    inner_points,
+                                    egui::Stroke::new(1.5, egui::Color32::from_rgb(140, 100, 240)),
                                 ));
                             }
                         }
@@ -1081,25 +1424,80 @@ impl MineShiftApp {
                                     cell_size * 0.08,
                                     egui::Color32::WHITE,
                                 );
-                            } else if cell.adjacent_mines > 0 {
-                                let text_color =
-                                    self.theme.colors.number_color(cell.adjacent_mines as usize);
+                            } else if cell.adjacent_mines > 0
+                                || (cell.clue_type == minecore::board::ClueType::Ring2
+                                    && cell.ring2_mines > 0)
+                            {
+                                let (clue_val, text_color) =
+                                    if cell.clue_type == minecore::board::ClueType::Ring2 {
+                                        (cell.ring2_mines, egui::Color32::from_rgb(160, 110, 255))
+                                    } else {
+                                        (
+                                            cell.adjacent_mines,
+                                            self.theme
+                                                .colors
+                                                .number_color(cell.adjacent_mines as usize),
+                                        )
+                                    };
                                 ui.painter().text(
                                     center,
                                     egui::Align2::CENTER_CENTER,
-                                    cell.adjacent_mines.to_string(),
+                                    clue_val.to_string(),
                                     egui::FontId::proportional(cell_size * 0.7),
                                     text_color,
                                 );
+                                if cell.clue_type == minecore::board::ClueType::Ring2 {
+                                    ui.painter().circle_stroke(
+                                        center + egui::vec2(cell_size * 0.28, -cell_size * 0.28),
+                                        cell_size * 0.08,
+                                        egui::Stroke::new(
+                                            1.5,
+                                            egui::Color32::from_rgb(140, 100, 240),
+                                        ),
+                                    );
+                                }
                             }
                         }
                         CellState::Covered => {}
+                    }
+
+                    if let Some(ref hint) = self.active_hint {
+                        if hint.conclusion.coords() == (x, y) {
+                            let pulse = (time * 4.0).sin() * 0.5 + 0.5;
+                            let halo_r = draw_cell_size * (0.6 + 0.15 * pulse as f32);
+                            let halo_col = if !hint.conclusion.is_safe() {
+                                egui::Color32::from_rgba_unmultiplied(
+                                    230,
+                                    76,
+                                    60,
+                                    (140.0 + 80.0 * pulse) as u8,
+                                )
+                            } else {
+                                egui::Color32::from_rgba_unmultiplied(
+                                    80,
+                                    200,
+                                    120,
+                                    (140.0 + 80.0 * pulse) as u8,
+                                )
+                            };
+                            ui.painter().circle_stroke(
+                                center,
+                                halo_r,
+                                egui::Stroke::new(3.0, halo_col),
+                            );
+                        }
                     }
                 }
             }
 
             let old_status = self.board.status;
             let time = ui.input(|i| i.time);
+            if clicked_cell.is_some()
+                || secondary_clicked_cell.is_some()
+                || middle_clicked_cell.is_some()
+            {
+                self.active_hint = None;
+            }
             if let Some(((x, y), pt)) = clicked_cell {
                 if self.board.first_click && self.board.is_no_guess {
                     // Start generation thread
@@ -1127,6 +1525,16 @@ impl MineShiftApp {
                             self.settings.cursor.reduced_motion,
                         );
                         self.shake.add_trauma(0.04);
+
+                        if self.mode_state.id == mode::GameModeId::Blitz {
+                            if time - self.blitz_last_reveal_time < 2.0 {
+                                self.blitz_combo = (self.blitz_combo + 1).min(5);
+                            } else {
+                                self.blitz_combo = 1;
+                            }
+                            self.blitz_last_reveal_time = time;
+                            self.mode_state.score += (20 * self.blitz_combo) as i64;
+                        }
                     }
                     let was_covered_cells: Vec<(usize, usize)> = (0..self.board.height)
                         .flat_map(|cy| (0..self.board.width).map(move |cx| (cx, cy)))
@@ -1148,14 +1556,31 @@ impl MineShiftApp {
                     }
 
                     if self.board.status == GameStatus::Lost {
-                        self.audio.play(SoundEffect::Explosion);
-                        self.audio.play(SoundEffect::Defeat);
-                        self.shake.add_trauma(0.85);
-                        self.particles.spawn_explosion(
-                            pt,
-                            self.theme.colors.danger(),
-                            self.settings.cursor.reduced_motion,
-                        );
+                        if self.mode_state.id == mode::GameModeId::Survival
+                            && self.mode_state.lives > 1
+                        {
+                            self.mode_state.lives -= 1;
+                            self.board.status = GameStatus::Playing;
+                            let idx = self.board.get_index(x, y);
+                            self.board.cells[idx].state = CellState::Flagged;
+                            self.board.flags_placed += 1;
+                            self.audio.play(SoundEffect::Explosion);
+                            self.shake.add_trauma(0.5);
+                            self.particles.spawn_explosion(
+                                pt,
+                                self.theme.colors.danger(),
+                                self.settings.cursor.reduced_motion,
+                            );
+                        } else {
+                            self.audio.play(SoundEffect::Explosion);
+                            self.audio.play(SoundEffect::Defeat);
+                            self.shake.add_trauma(0.85);
+                            self.particles.spawn_explosion(
+                                pt,
+                                self.theme.colors.danger(),
+                                self.settings.cursor.reduced_motion,
+                            );
+                        }
                     } else if self.board.status == GameStatus::Won {
                         self.audio.play(SoundEffect::Victory);
                         self.particles
@@ -1400,6 +1825,23 @@ impl MineShiftApp {
                             }
                             if self.mode_state.id == mode::GameModeId::Daily {
                                 let _ = db.unlock_achievement(profile.id, "daily_win");
+                            }
+
+                            if let Some(ref chal_id) = self.active_challenge_id {
+                                if let Some(ch) = MasteryChallenge::catalog()
+                                    .into_iter()
+                                    .find(|c| c.id == *chal_id)
+                                {
+                                    let _ = db.record_challenge_completion(
+                                        profile.id,
+                                        chal_id,
+                                        duration_ms,
+                                        ch.xp_reward,
+                                    );
+                                    if let Ok(comps) = db.get_challenge_completions(profile.id) {
+                                        self.challenge_completions = comps;
+                                    }
+                                }
                             }
                         }
                         self.profiles = db.get_profiles().unwrap_or_default();
@@ -2123,7 +2565,25 @@ impl MineShiftApp {
         let text_muted = self.theme.colors.text_muted();
         let accent = self.theme.colors.accent();
 
-        if ui_tokens::screen_header(ui, "GAME MODES", text_primary, border, card_bg, |_| {}) {
+        if ui_tokens::screen_header(ui, "GAME MODES", text_primary, border, card_bg, |ui| {
+            if ui
+                .button(
+                    egui::RichText::new("🏆 Mastery Challenges")
+                        .size(15.0)
+                        .strong()
+                        .color(accent),
+                )
+                .clicked()
+            {
+                self.audio.play(SoundEffect::UiClick);
+                if let (Some(prof), Some(db)) = (&self.active_profile, &self.db) {
+                    if let Ok(comps) = db.get_challenge_completions(prof.id) {
+                        self.challenge_completions = comps;
+                    }
+                }
+                self.screen = AppScreen::MasteryChallenges;
+            }
+        }) {
             self.audio.play(SoundEffect::UiClick);
             self.screen = AppScreen::MainMenu;
         }
@@ -2191,6 +2651,15 @@ impl MineShiftApp {
 
                                             if ui.add(play_btn).clicked() {
                                                 self.audio.play(SoundEffect::UiClick);
+                                                self.active_challenge_id = None;
+                                                self.active_hint = None;
+                                                self.blitz_combo = 0;
+
+                                                if id == mode::GameModeId::Sandbox {
+                                                    self.screen = AppScreen::SandboxLab;
+                                                    return;
+                                                }
+
                                                 self.mode_state = mode::ModeState::new(id.clone());
                                                 if variant == "SQUARE" {
                                                     // Intermediate
@@ -2260,6 +2729,693 @@ impl MineShiftApp {
                 });
         });
     }
+
+    fn show_mastery_challenges(&mut self, ui: &mut egui::Ui) {
+        let card_bg = self.theme.colors.card_bg();
+        let border = self.theme.colors.border();
+        let text_primary = self.theme.colors.text_primary();
+        let text_muted = self.theme.colors.text_muted();
+        let accent = self.theme.colors.accent();
+        let success = self.theme.colors.success();
+
+        if ui_tokens::screen_header(
+            ui,
+            "MASTERY CHALLENGES",
+            text_primary,
+            border,
+            card_bg,
+            |_| {},
+        ) {
+            self.audio.play(SoundEffect::UiClick);
+            self.screen = AppScreen::MainMenu;
+        }
+
+        ui.add_space(14.0);
+
+        let catalog = MasteryChallenge::catalog();
+        let total_count = catalog.len();
+        let completed_count = catalog
+            .iter()
+            .filter(|c| self.challenge_completions.contains_key(&c.id))
+            .count();
+        let progress_pct = if total_count > 0 {
+            completed_count as f32 / total_count as f32
+        } else {
+            0.0
+        };
+
+        ui_tokens::centered_container(ui, 1020.0, |ui| {
+            // Header stats & progress bar
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Completed {} / {} Challenges ({:.0}%)",
+                        completed_count,
+                        total_count,
+                        progress_pct * 100.0
+                    ))
+                    .size(15.0)
+                    .strong()
+                    .color(text_primary),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let total_xp_earned: i64 = catalog
+                        .iter()
+                        .filter(|c| self.challenge_completions.contains_key(&c.id))
+                        .map(|c| c.xp_reward)
+                        .sum();
+                    ui.label(
+                        egui::RichText::new(format!("⭐ +{} XP Earned", total_xp_earned))
+                            .size(14.0)
+                            .strong()
+                            .color(accent),
+                    );
+                });
+            });
+            ui.add_space(8.0);
+            let pb = egui::ProgressBar::new(progress_pct).fill(accent);
+            ui.add_sized([ui.available_width(), 10.0], pb);
+
+            ui.add_space(14.0);
+
+            // Tier Filter Pills
+            ui.horizontal(|ui| {
+                let filters = [
+                    (None, format!("All ({})", total_count)),
+                    (Some(ChallengeTier::Beginner), "Beginner".to_string()),
+                    (
+                        Some(ChallengeTier::Intermediate),
+                        "Intermediate".to_string(),
+                    ),
+                    (Some(ChallengeTier::Advanced), "Advanced".to_string()),
+                    (Some(ChallengeTier::Expert), "Expert".to_string()),
+                    (Some(ChallengeTier::Master), "Master".to_string()),
+                ];
+
+                for (tier_opt, label) in filters {
+                    let is_active = self.challenge_tier_filter == tier_opt;
+                    let btn =
+                        egui::Button::new(egui::RichText::new(label).size(13.0).strong().color(
+                            if is_active {
+                                egui::Color32::WHITE
+                            } else {
+                                text_primary
+                            },
+                        ))
+                        .fill(if is_active { accent } else { card_bg })
+                        .stroke(if is_active {
+                            egui::Stroke::NONE
+                        } else {
+                            egui::Stroke::new(1.0, border)
+                        })
+                        .corner_radius(12.0)
+                        .min_size(egui::vec2(95.0, 30.0));
+
+                    if ui.add(btn).clicked() {
+                        self.audio.play(SoundEffect::UiClick);
+                        self.challenge_tier_filter = tier_opt;
+                    }
+                    ui.add_space(6.0);
+                }
+            });
+
+            ui.add_space(14.0);
+
+            // Responsive 2-column Grid of Challenge Cards
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    let col_spacing = 16.0;
+                    let card_frame_w = ((ui.available_width() - col_spacing) / 2.0)
+                        .floor()
+                        .max(240.0);
+                    let card_inner_w = (card_frame_w - 32.0).max(200.0);
+
+                    let filtered_challenges: Vec<_> = catalog
+                        .into_iter()
+                        .filter(|c| {
+                            if let Some(tier) = self.challenge_tier_filter {
+                                c.tier == tier
+                            } else {
+                                true
+                            }
+                        })
+                        .collect();
+
+                    for chunk in filtered_challenges.chunks(2) {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = col_spacing;
+                            for c in chunk {
+                                let is_completed = self.challenge_completions.contains_key(&c.id);
+                                let completion_record = self.challenge_completions.get(&c.id);
+
+                                let card_stroke = if is_completed {
+                                    egui::Stroke::new(1.5, success)
+                                } else {
+                                    egui::Stroke::new(1.0, border)
+                                };
+
+                                egui::Frame::new()
+                                    .fill(card_bg)
+                                    .stroke(card_stroke)
+                                    .corner_radius(12.0)
+                                    .inner_margin(16.0)
+                                    .show(ui, |ui| {
+                                        ui.set_width(card_inner_w);
+                                        ui.vertical(|ui| {
+                                            // Top row: Tier Badge + Category Pill + XP Badge
+                                            ui.horizontal(|ui| {
+                                                let (tier_bg, tier_name) = match c.tier {
+                                                    ChallengeTier::Beginner => (
+                                                        egui::Color32::from_rgb(80, 200, 120),
+                                                        "BEGINNER",
+                                                    ),
+                                                    ChallengeTier::Intermediate => (
+                                                        egui::Color32::from_rgb(74, 144, 226),
+                                                        "INTERMEDIATE",
+                                                    ),
+                                                    ChallengeTier::Advanced => (
+                                                        egui::Color32::from_rgb(155, 89, 182),
+                                                        "ADVANCED",
+                                                    ),
+                                                    ChallengeTier::Expert => (
+                                                        egui::Color32::from_rgb(230, 126, 34),
+                                                        "EXPERT",
+                                                    ),
+                                                    ChallengeTier::Master => (
+                                                        egui::Color32::from_rgb(231, 76, 60),
+                                                        "MASTER",
+                                                    ),
+                                                };
+
+                                                egui::Frame::new()
+                                                    .fill(tier_bg)
+                                                    .corner_radius(6.0)
+                                                    .inner_margin(egui::vec2(6.0, 2.0))
+                                                    .show(ui, |ui| {
+                                                        ui.label(
+                                                            egui::RichText::new(tier_name)
+                                                                .size(10.0)
+                                                                .strong()
+                                                                .color(egui::Color32::WHITE),
+                                                        );
+                                                    });
+
+                                                ui.add_space(6.0);
+                                                ui.label(
+                                                    egui::RichText::new(c.category.name())
+                                                        .size(12.0)
+                                                        .color(text_muted),
+                                                );
+
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(
+                                                        egui::Align::Center,
+                                                    ),
+                                                    |ui| {
+                                                        ui.label(
+                                                            egui::RichText::new(format!(
+                                                                "+{} XP",
+                                                                c.xp_reward
+                                                            ))
+                                                            .size(13.0)
+                                                            .strong()
+                                                            .color(accent),
+                                                        );
+                                                    },
+                                                );
+                                            });
+
+                                            ui.add_space(8.0);
+
+                                            // Title
+                                            ui.label(
+                                                egui::RichText::new(&c.title)
+                                                    .size(18.0)
+                                                    .strong()
+                                                    .color(text_primary),
+                                            );
+
+                                            ui.add_space(4.0);
+
+                                            // Description
+                                            ui.label(
+                                                egui::RichText::new(&c.description)
+                                                    .size(13.0)
+                                                    .color(text_muted),
+                                            );
+
+                                            ui.add_space(10.0);
+
+                                            // Rules / Modifiers row
+                                            ui.horizontal_wrapped(|ui| {
+                                                let topo_str = match c.ruleset.topology {
+                                                    minecore::board::Geometry::Square => {
+                                                        format!(
+                                                            "Square {}×{}",
+                                                            c.ruleset.width, c.ruleset.height
+                                                        )
+                                                    }
+                                                    minecore::board::Geometry::Hex => {
+                                                        format!("Hexagon R{}", c.ruleset.radius)
+                                                    }
+                                                };
+                                                ui.label(
+                                                    egui::RichText::new(format!("📐 {}", topo_str))
+                                                        .size(11.0)
+                                                        .color(text_muted),
+                                                );
+                                                ui.add_space(8.0);
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "💣 {} Mines",
+                                                        c.ruleset.mine_count
+                                                    ))
+                                                    .size(11.0)
+                                                    .color(text_muted),
+                                                );
+
+                                                match c.ruleset.flag_policy {
+                                                    FlagPolicy::NoFlags => {
+                                                        ui.add_space(8.0);
+                                                        ui.label(
+                                                            egui::RichText::new("🚫 No Flags")
+                                                                .size(11.0)
+                                                                .strong()
+                                                                .color(self.theme.colors.danger()),
+                                                        );
+                                                    }
+                                                    FlagPolicy::LimitedFlags { max_flags } => {
+                                                        ui.add_space(8.0);
+                                                        ui.label(
+                                                            egui::RichText::new(format!(
+                                                                "🚩 {} Flags",
+                                                                max_flags
+                                                            ))
+                                                            .size(11.0)
+                                                            .strong()
+                                                            .color(accent),
+                                                        );
+                                                    }
+                                                    FlagPolicy::Standard => {}
+                                                }
+
+                                                if c.ruleset.clue_policy
+                                                    == CluePolicy::ExtendedRing2
+                                                {
+                                                    ui.add_space(8.0);
+                                                    ui.label(
+                                                        egui::RichText::new("🔵 Ring-2 Clues")
+                                                            .size(11.0)
+                                                            .strong()
+                                                            .color(egui::Color32::from_rgb(
+                                                                160, 110, 255,
+                                                            )),
+                                                    );
+                                                }
+
+                                                if let Some(target) = c.target_time_sec {
+                                                    ui.add_space(8.0);
+                                                    ui.label(
+                                                        egui::RichText::new(format!(
+                                                            "⏱ < {:.0}s",
+                                                            target
+                                                        ))
+                                                        .size(11.0)
+                                                        .color(accent),
+                                                    );
+                                                }
+                                            });
+
+                                            ui.add_space(12.0);
+
+                                            // Bottom action row: Status badge + Start Button
+                                            ui.horizontal(|ui| {
+                                                if is_completed {
+                                                    let best_text =
+                                                        if let Some(rec) = completion_record {
+                                                            format!(
+                                                                "✓ COMPLETED ({:.1}s)",
+                                                                rec.best_time_ms as f64 / 1000.0
+                                                            )
+                                                        } else {
+                                                            "✓ COMPLETED".to_string()
+                                                        };
+                                                    egui::Frame::new()
+                                                        .fill(success.linear_multiply(0.2))
+                                                        .corner_radius(6.0)
+                                                        .stroke(egui::Stroke::new(1.0, success))
+                                                        .inner_margin(egui::vec2(8.0, 4.0))
+                                                        .show(ui, |ui| {
+                                                            ui.label(
+                                                                egui::RichText::new(best_text)
+                                                                    .size(11.0)
+                                                                    .strong()
+                                                                    .color(success),
+                                                            );
+                                                        });
+                                                } else {
+                                                    egui::Frame::new()
+                                                        .fill(card_bg)
+                                                        .corner_radius(6.0)
+                                                        .stroke(egui::Stroke::new(1.0, border))
+                                                        .inner_margin(egui::vec2(8.0, 4.0))
+                                                        .show(ui, |ui| {
+                                                            ui.label(
+                                                                egui::RichText::new("UNSOLVED")
+                                                                    .size(11.0)
+                                                                    .strong()
+                                                                    .color(text_muted),
+                                                            );
+                                                        });
+                                                }
+
+                                                ui.with_layout(
+                                                    egui::Layout::right_to_left(
+                                                        egui::Align::Center,
+                                                    ),
+                                                    |ui| {
+                                                        let play_btn = egui::Button::new(
+                                                            egui::RichText::new("START CHALLENGE")
+                                                                .size(13.0)
+                                                                .strong()
+                                                                .color(egui::Color32::WHITE),
+                                                        )
+                                                        .fill(accent)
+                                                        .corner_radius(6.0)
+                                                        .min_size(egui::vec2(140.0, 32.0));
+
+                                                        if ui.add(play_btn).clicked() {
+                                                            self.audio.play(SoundEffect::UiClick);
+                                                            self.active_challenge_id =
+                                                                Some(c.id.clone());
+                                                            self.active_hint = None;
+                                                            self.blitz_combo = 0;
+                                                            self.board = Board::from_ruleset(
+                                                                c.ruleset.clone(),
+                                                            );
+                                                            self.mode_state = mode::ModeState::new(
+                                                                mode::GameModeId::Classic,
+                                                            );
+                                                            if let Some(t) = c.target_time_sec {
+                                                                self.mode_state.time_limit_sec =
+                                                                    Some(t);
+                                                            } else {
+                                                                self.mode_state.time_limit_sec =
+                                                                    None;
+                                                            }
+                                                            self.mode_state.lives =
+                                                                c.ruleset.lives as i32;
+                                                            self.screen = AppScreen::Gameplay;
+                                                        }
+                                                    },
+                                                );
+                                            });
+                                        });
+                                    });
+                            }
+                        });
+                        ui.add_space(10.0);
+                    }
+                    ui.add_space(30.0);
+                });
+        });
+    }
+
+    fn show_sandbox_lab(&mut self, ui: &mut egui::Ui) {
+        let card_bg = self.theme.colors.card_bg();
+        let border = self.theme.colors.border();
+        let text_primary = self.theme.colors.text_primary();
+        let text_muted = self.theme.colors.text_muted();
+        let accent = self.theme.colors.accent();
+
+        if ui_tokens::screen_header(
+            ui,
+            "CUSTOM SANDBOX LABORATORY",
+            text_primary,
+            border,
+            card_bg,
+            |_| {},
+        ) {
+            self.audio.play(SoundEffect::UiClick);
+            self.screen = AppScreen::GameModes;
+        }
+
+        ui.add_space(10.0);
+
+        ui_tokens::centered_container(ui, 860.0, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    ui_tokens::card_frame(card_bg, border, 12.0, 14.0).show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new("🔬 Experimental Board Configuration")
+                                .size(17.0)
+                                .strong()
+                                .color(text_primary),
+                        );
+                        ui.add_space(2.0);
+                        ui.label(
+                            egui::RichText::new("Tinker with dimensions, topologies, opening mechanics, flagging constraints, and extended clues.")
+                                .size(12.0)
+                                .color(text_muted),
+                        );
+
+                        ui.add_space(12.0);
+
+                        // 1. Geometry Selection
+                        ui.label(egui::RichText::new("1. Board Topology").size(14.0).strong().color(text_primary));
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            let is_sq = self.sandbox_geometry == minecore::board::Geometry::Square;
+                            let sq_btn = egui::Button::new(egui::RichText::new("Square Grid (Cartesian)").strong().color(if is_sq { egui::Color32::WHITE } else { text_primary }))
+                                .fill(if is_sq { accent } else { card_bg })
+                                .stroke(egui::Stroke::new(1.0, border))
+                                .corner_radius(8.0)
+                                .min_size(egui::vec2(190.0, 32.0));
+                            if ui.add(sq_btn).clicked() {
+                                self.sandbox_geometry = minecore::board::Geometry::Square;
+                            }
+
+                            ui.add_space(10.0);
+
+                            let is_hex = self.sandbox_geometry == minecore::board::Geometry::Hex;
+                            let hex_btn = egui::Button::new(egui::RichText::new("Hexagonal Grid (Axial)").strong().color(if is_hex { egui::Color32::WHITE } else { text_primary }))
+                                .fill(if is_hex { accent } else { card_bg })
+                                .stroke(egui::Stroke::new(1.0, border))
+                                .corner_radius(8.0)
+                                .min_size(egui::vec2(190.0, 32.0));
+                            if ui.add(hex_btn).clicked() {
+                                self.sandbox_geometry = minecore::board::Geometry::Hex;
+                            }
+                        });
+
+                        ui.add_space(12.0);
+
+                        // 2. Dimensions & Mines
+                        ui.label(egui::RichText::new("2. Dimensions & Mine Density").size(14.0).strong().color(text_primary));
+                        ui.add_space(4.0);
+                        let total_cells = match self.sandbox_geometry {
+                            minecore::board::Geometry::Square => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Width:");
+                                    ui.add(egui::Slider::new(&mut self.sandbox_width, 5..=40).text("cols"));
+                                    ui.add_space(16.0);
+                                    ui.label("Height:");
+                                    ui.add(egui::Slider::new(&mut self.sandbox_height, 5..=30).text("rows"));
+                                });
+                                self.sandbox_width * self.sandbox_height
+                            }
+                            minecore::board::Geometry::Hex => {
+                                ui.horizontal(|ui| {
+                                    ui.label("Hex Radius:");
+                                    ui.add(egui::Slider::new(&mut self.sandbox_radius, 3..=12).text("rings"));
+                                });
+                                3 * self.sandbox_radius * (self.sandbox_radius + 1) + 1
+                            }
+                        };
+
+                        let max_mines = (total_cells.saturating_sub(10)).max(1);
+                        self.sandbox_mines = self.sandbox_mines.clamp(1, max_mines);
+
+                        ui.add_space(4.0);
+                        let density = (self.sandbox_mines as f32 / total_cells as f32) * 100.0;
+                        ui.horizontal(|ui| {
+                            ui.label("Mines:");
+                            ui.add(egui::Slider::new(&mut self.sandbox_mines, 1..=max_mines).text(format!("mines ({:.1}% density)", density)));
+                        });
+
+                        ui.add_space(12.0);
+
+                        // 3. Opening Policy
+                        ui.label(egui::RichText::new("3. First-Click Opening Policy").size(14.0).strong().color(text_primary));
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            let policies = [
+                                (FirstClickPolicy::StandardSafe, "Standard Safe", "Initial cell never contains a mine."),
+                                (FirstClickPolicy::GuaranteedZeroOpening, "Guaranteed 0 Opening", "Forces an opening with 0 adjacent mines."),
+                                (FirstClickPolicy::ValidatedDeductionOpening, "Validated Logic Opening", "Guarantees a logical starting cluster."),
+                            ];
+                            for (pol, label, _tooltip) in policies {
+                                let is_active = self.sandbox_opening_policy == pol;
+                                let btn = egui::Button::new(egui::RichText::new(label).strong().color(if is_active { egui::Color32::WHITE } else { text_primary }))
+                                    .fill(if is_active { accent } else { card_bg })
+                                    .stroke(egui::Stroke::new(1.0, border))
+                                    .corner_radius(6.0)
+                                    .min_size(egui::vec2(150.0, 30.0));
+                                if ui.add(btn).clicked() {
+                                    self.sandbox_opening_policy = pol;
+                                }
+                                ui.add_space(8.0);
+                            }
+                        });
+
+                        ui.add_space(12.0);
+
+                        // 4. Flagging Policy
+                        ui.label(egui::RichText::new("4. Flagging Mechanics").size(14.0).strong().color(text_primary));
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            let is_std = matches!(self.sandbox_flag_policy, FlagPolicy::Standard);
+                            let is_none = matches!(self.sandbox_flag_policy, FlagPolicy::NoFlags);
+                            let is_ltd = matches!(self.sandbox_flag_policy, FlagPolicy::LimitedFlags { .. });
+
+                            let std_btn = egui::Button::new(egui::RichText::new("Standard (Unlimited)").strong().color(if is_std { egui::Color32::WHITE } else { text_primary }))
+                                .fill(if is_std { accent } else { card_bg })
+                                .stroke(egui::Stroke::new(1.0, border))
+                                .corner_radius(6.0)
+                                .min_size(egui::vec2(140.0, 30.0));
+                            if ui.add(std_btn).clicked() {
+                                self.sandbox_flag_policy = FlagPolicy::Standard;
+                            }
+                            ui.add_space(8.0);
+
+                            let no_btn = egui::Button::new(egui::RichText::new("🚫 Precision (No Flags)").strong().color(if is_none { egui::Color32::WHITE } else { text_primary }))
+                                .fill(if is_none { accent } else { card_bg })
+                                .stroke(egui::Stroke::new(1.0, border))
+                                .corner_radius(6.0)
+                                .min_size(egui::vec2(150.0, 30.0));
+                            if ui.add(no_btn).clicked() {
+                                self.sandbox_flag_policy = FlagPolicy::NoFlags;
+                            }
+                            ui.add_space(8.0);
+
+                            let ltd_btn = egui::Button::new(egui::RichText::new("🚩 Limited Flags").strong().color(if is_ltd { egui::Color32::WHITE } else { text_primary }))
+                                .fill(if is_ltd { accent } else { card_bg })
+                                .stroke(egui::Stroke::new(1.0, border))
+                                .corner_radius(6.0)
+                                .min_size(egui::vec2(130.0, 30.0));
+                            if ui.add(ltd_btn).clicked() {
+                                self.sandbox_flag_policy = FlagPolicy::LimitedFlags { max_flags: (self.sandbox_mines / 2).max(1) };
+                            }
+                        });
+
+                        if let FlagPolicy::LimitedFlags { ref mut max_flags } = self.sandbox_flag_policy {
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                ui.label("Maximum Allowed Flags:");
+                                ui.add(egui::Slider::new(max_flags, 1..=self.sandbox_mines));
+                            });
+                        }
+
+                        ui.add_space(12.0);
+
+                        // 5. Clue & Deduction Policies
+                        ui.label(egui::RichText::new("5. Clue Cell Mechanics").size(14.0).strong().color(text_primary));
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            let is_std_clue = self.sandbox_clue_policy == CluePolicy::StandardOnly;
+                            let std_c_btn = egui::Button::new(egui::RichText::new("Standard Adjacent (Distance 1)").strong().color(if is_std_clue { egui::Color32::WHITE } else { text_primary }))
+                                .fill(if is_std_clue { accent } else { card_bg })
+                                .stroke(egui::Stroke::new(1.0, border))
+                                .corner_radius(6.0)
+                                .min_size(egui::vec2(180.0, 30.0));
+                            if ui.add(std_c_btn).clicked() {
+                                self.sandbox_clue_policy = CluePolicy::StandardOnly;
+                            }
+                            ui.add_space(8.0);
+
+                            let is_r2_clue = self.sandbox_clue_policy == CluePolicy::ExtendedRing2;
+                            let r2_c_btn = egui::Button::new(egui::RichText::new("🔵 Extended Ring-2 Clues (Distance 2)").strong().color(if is_r2_clue { egui::Color32::WHITE } else { text_primary }))
+                                .fill(if is_r2_clue { accent } else { card_bg })
+                                .stroke(egui::Stroke::new(1.0, border))
+                                .corner_radius(6.0)
+                                .min_size(egui::vec2(210.0, 30.0));
+                            if ui.add(r2_c_btn).clicked() {
+                                self.sandbox_clue_policy = CluePolicy::ExtendedRing2;
+                            }
+                        });
+
+                        ui.add_space(12.0);
+
+                        // 6. Logic Guarantee
+                        ui.label(egui::RichText::new("6. Logic Guarantee").size(14.0).strong().color(text_primary));
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            let is_none_log = self.sandbox_logic_guarantee == LogicGuarantee::StandardProbabilistic;
+                            let none_btn = egui::Button::new(egui::RichText::new("Standard Random").strong().color(if is_none_log { egui::Color32::WHITE } else { text_primary }))
+                                .fill(if is_none_log { accent } else { card_bg })
+                                .stroke(egui::Stroke::new(1.0, border))
+                                .corner_radius(6.0)
+                                .min_size(egui::vec2(140.0, 30.0));
+                            if ui.add(none_btn).clicked() {
+                                self.sandbox_logic_guarantee = LogicGuarantee::StandardProbabilistic;
+                            }
+                            ui.add_space(8.0);
+
+                            let is_cert = self.sandbox_logic_guarantee == LogicGuarantee::CertifiedNoGuess;
+                            let cert_btn = egui::Button::new(egui::RichText::new("✓ Certified Solvable (No Guess)").strong().color(if is_cert { egui::Color32::WHITE } else { text_primary }))
+                                .fill(if is_cert { accent } else { card_bg })
+                                .stroke(egui::Stroke::new(1.0, border))
+                                .corner_radius(6.0)
+                                .min_size(egui::vec2(180.0, 30.0));
+                            if ui.add(cert_btn).clicked() {
+                                self.sandbox_logic_guarantee = LogicGuarantee::CertifiedNoGuess;
+                            }
+                        });
+
+                        ui.add_space(16.0);
+
+                        // Launch Button
+                        let launch_btn = egui::Button::new(
+                            egui::RichText::new("🚀 LAUNCH EXPERIMENT")
+                                .size(17.0)
+                                .strong()
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(accent)
+                        .corner_radius(8.0)
+                        .min_size(egui::vec2(ui.available_width(), 48.0));
+
+                        if ui.add(launch_btn).clicked() {
+                            self.audio.play(SoundEffect::UiClick);
+                            let ruleset = Ruleset {
+                                topology: self.sandbox_geometry,
+                                width: self.sandbox_width,
+                                height: self.sandbox_height,
+                                radius: self.sandbox_radius,
+                                mine_count: self.sandbox_mines,
+                                first_click_policy: self.sandbox_opening_policy,
+                                flag_policy: self.sandbox_flag_policy,
+                                clue_policy: self.sandbox_clue_policy,
+                                logic_guarantee: self.sandbox_logic_guarantee,
+                                assist_policy: AssistPolicy::Allowed,
+                                time_limit_sec: None,
+                                lives: 1,
+                            };
+                            self.active_challenge_id = None;
+                            self.active_hint = None;
+                            self.blitz_combo = 0;
+                            self.board = Board::from_ruleset(ruleset);
+                            self.mode_state = mode::ModeState::new(mode::GameModeId::Sandbox);
+                            self.screen = AppScreen::Gameplay;
+                        }
+                    });
+                    ui.add_space(30.0);
+                });
+        });
+    }
+
     fn show_generating(&mut self, ui: &mut egui::Ui) {
         // Must request repaint continuously while generating to keep the UI ticking
         ui.ctx().request_repaint();
@@ -3733,6 +4889,8 @@ impl eframe::App for MineShiftApp {
                 AppScreen::Statistics => self.show_statistics(ui),
                 AppScreen::Achievements => self.show_achievements(ui),
                 AppScreen::GameModes => self.show_game_modes(ui),
+                AppScreen::MasteryChallenges => self.show_mastery_challenges(ui),
+                AppScreen::SandboxLab => self.show_sandbox_lab(ui),
                 AppScreen::GeneratingNoGuess => self.show_generating(ui),
                 AppScreen::ThemeStudio => self.show_theme_studio(ui),
                 AppScreen::ProfileCosmetics => self.show_profile_cosmetics(ui),

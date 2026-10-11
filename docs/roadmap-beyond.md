@@ -17,8 +17,16 @@ This document outlines the massive 20-update roadmap charting MINE//SHIFT's evol
 - **Goals:** Tactile visual UI polish, including particle effects, fluid animations, and screen-shake on defeat.
 - **Features:** Custom egui painting shaders, sweeping reveal animations, polished explosion effects.
 
-## 10 — Gameplay Evolution
-- **Goals:** Introduce non-standard modifiers (wrapping edges, shifting mines) via the `Board` abstraction.
+## 10 — Gameplay Evolution (CURRENT)
+- **Goals:** Advanced Logic Engine, New Puzzle Mechanics, Mastery Challenges, and Evolved Game Modes across Square and Hex boards.
+- **Features:**
+  - Structured deduction engine (`DeductionType`, `Explanation`, Ring-2 constraints, Subset reductions, non-leaking player hints).
+  - Extended Clues (Ring-2 Clue cells with distinctive visuals and dual-ring constraints).
+  - Modifier rules (No Flags / Precision Mode, Limited Flags with pool exhaustion).
+  - First-Click Opening policies (Standard Safe, Guaranteed 0 Opening, Validated Deduction Opening).
+  - Mastery Challenge system (11-challenge tiered catalog across 5 categories, SQLite persistence & XP rewards).
+  - 9 Evolved Game Modes (Blitz dynamic combo multipliers, Survival heart resilience, Zen logic hints, Expedition modifiers, Custom Sandbox Lab).
+- **Status:** IMPLEMENTED & VERIFIED.
 
 ## 11 — Windows 1.0
 - **Goals:** Exit beta. Polish SQLite error handling, build installers, add native OS notifications, freeze local save formats.

@@ -28,5 +28,41 @@
     "name": "Android Touch Gestures",
     "status": "NOT STARTED",
     "update": "24"
+  },
+  {
+    "id": "F-006",
+    "name": "Advanced Logic Engine (Subsets, Ring-2 & Explanations)",
+    "status": "IMPLEMENTED",
+    "update": "10"
+  },
+  {
+    "id": "F-007",
+    "name": "Precision & Limited Flags Mechanics",
+    "status": "IMPLEMENTED",
+    "update": "10"
+  },
+  {
+    "id": "F-008",
+    "name": "Extended Clue Cells (Distance-2 Ring Clues)",
+    "status": "IMPLEMENTED",
+    "update": "10"
+  },
+  {
+    "id": "F-009",
+    "name": "Mastery Challenges & SQLite Persistence",
+    "status": "IMPLEMENTED",
+    "update": "10"
+  },
+  {
+    "id": "F-010",
+    "name": "Custom Sandbox Laboratory",
+    "status": "IMPLEMENTED",
+    "update": "10"
+  },
+  {
+    "id": "F-011",
+    "name": "Evolved Game Modes (Blitz Combo, Survival Shields, Zen Hints)",
+    "status": "IMPLEMENTED",
+    "update": "10"
   }
 ]

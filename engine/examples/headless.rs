@@ -1,4 +1,4 @@
-use minecore::board::{Board, CellState};
+use minecore::board::Board;
 use minecore::solver::Solver;
 
 fn main() {

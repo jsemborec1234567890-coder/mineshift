@@ -1,0 +1,30 @@
+{
+  "contract_version": "1.0",
+  "fixture_id": "fix_02_square_ring2",
+  "description": "Square 7x7 with Ring-2 Extended Clue deduction",
+  "topology": "square",
+  "width": 7,
+  "height": 7,
+  "radius": 0,
+  "ruleset": {
+    "mine_count": 1,
+    "flag_policy": "standard",
+    "clue_policy": "extended_ring2",
+    "first_click_policy": "safe_only"
+  },
+  "secret_mines": [
+    [5, 3]
+  ],
+  "visible_revealed": [
+    { "x": 3, "y": 3, "clue": 0, "ring2_clue": 1, "clue_type": "ring2" }
+  ],
+  "visible_flags": [],
+  "expected_deductions": {
+    "forced_mines": [],
+    "forced_safes": [
+      [2, 2], [3, 2], [4, 2],
+      [2, 3],        [4, 3],
+      [2, 4], [3, 4], [4, 4]
+    ]
+  }
+}

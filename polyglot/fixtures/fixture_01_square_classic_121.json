@@ -1,0 +1,34 @@
+{
+  "contract_version": "1.0",
+  "fixture_id": "fix_01_classic_121",
+  "description": "Square 3x2 canonical 1-2-1 subset deduction pattern along boundary",
+  "topology": "square",
+  "width": 3,
+  "height": 2,
+  "radius": 0,
+  "ruleset": {
+    "mine_count": 2,
+    "flag_policy": "standard",
+    "clue_policy": "standard",
+    "first_click_policy": "safe_only"
+  },
+  "secret_mines": [
+    [0, 1],
+    [2, 1]
+  ],
+  "visible_revealed": [
+    { "x": 0, "y": 0, "clue": 1, "clue_type": "standard" },
+    { "x": 1, "y": 0, "clue": 2, "clue_type": "standard" },
+    { "x": 2, "y": 0, "clue": 1, "clue_type": "standard" }
+  ],
+  "visible_flags": [],
+  "expected_deductions": {
+    "forced_mines": [
+      [0, 1],
+      [2, 1]
+    ],
+    "forced_safes": [
+      [1, 1]
+    ]
+  }
+}

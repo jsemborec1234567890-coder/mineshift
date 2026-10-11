@@ -1,0 +1,28 @@
+{
+  "contract_version": "1.0",
+  "fixture_id": "fix_04_tactical_rationing",
+  "description": "Tactical Rationing: Square 9x9 with 10 mines and 5 maximum flags",
+  "topology": "square",
+  "width": 9,
+  "height": 9,
+  "radius": 0,
+  "ruleset": {
+    "mine_count": 10,
+    "flag_policy": "limited_flags",
+    "max_flags": 5,
+    "clue_policy": "standard",
+    "first_click_policy": "safe_only"
+  },
+  "secret_mines": [
+    [8, 0], [8, 1], [8, 2], [8, 3], [8, 4],
+    [8, 5], [8, 6], [8, 7], [8, 8], [7, 0]
+  ],
+  "visible_revealed": [],
+  "visible_flags": [
+    [8, 0], [8, 1], [8, 2], [8, 3], [8, 4]
+  ],
+  "expected_deductions": {
+    "forced_mines": [],
+    "forced_safes": []
+  }
+}

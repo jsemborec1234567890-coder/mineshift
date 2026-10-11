@@ -1,0 +1,33 @@
+{
+  "contract_version": "1.0",
+  "fixture_id": "fix_03_hex_radius2",
+  "description": "Hexagonal board radius 2 (19 active cells) with axial coordinate deductions",
+  "topology": "hex",
+  "width": 5,
+  "height": 5,
+  "radius": 2,
+  "ruleset": {
+    "mine_count": 1,
+    "flag_policy": "standard",
+    "clue_policy": "standard",
+    "first_click_policy": "guaranteed_zero"
+  },
+  "secret_mines": [
+    [0, 2]
+  ],
+  "visible_revealed": [
+    { "x": 2, "y": 2, "clue": 0, "clue_type": "standard" },
+    { "x": 2, "y": 1, "clue": 0, "clue_type": "standard" },
+    { "x": 1, "y": 3, "clue": 0, "clue_type": "standard" },
+    { "x": 1, "y": 2, "clue": 1, "clue_type": "standard" }
+  ],
+  "visible_flags": [],
+  "expected_deductions": {
+    "forced_mines": [
+      [0, 2]
+    ],
+    "forced_safes": [
+      [1, 1], [0, 3], [3, 2], [2, 3]
+    ]
+  }
+}

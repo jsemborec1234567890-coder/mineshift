@@ -1,0 +1,116 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MineShiftPuzzleContractV1",
+  "type": "object",
+  "required": [
+    "contract_version",
+    "fixture_id",
+    "topology",
+    "ruleset",
+    "expected_deductions"
+  ],
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "fixture_id": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "topology": {
+      "type": "string",
+      "enum": ["square", "hex"]
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "radius": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ruleset": {
+      "type": "object",
+      "required": ["mine_count", "flag_policy", "clue_policy", "first_click_policy"],
+      "properties": {
+        "mine_count": { "type": "integer", "minimum": 1 },
+        "flag_policy": {
+          "type": "string",
+          "enum": ["standard", "no_flags", "limited_flags"]
+        },
+        "max_flags": { "type": "integer", "minimum": 0 },
+        "clue_policy": {
+          "type": "string",
+          "enum": ["standard", "extended_ring2"]
+        },
+        "first_click_policy": {
+          "type": "string",
+          "enum": ["safe_only", "guaranteed_zero", "validated_deduction"]
+        }
+      }
+    },
+    "secret_mines": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "integer" },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "visible_revealed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["x", "y", "clue"],
+        "properties": {
+          "x": { "type": "integer" },
+          "y": { "type": "integer" },
+          "clue": { "type": "integer" },
+          "ring2_clue": { "type": "integer" },
+          "clue_type": { "type": "string", "enum": ["standard", "ring2"] }
+        }
+      }
+    },
+    "visible_flags": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "integer" },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
+    "expected_deductions": {
+      "type": "object",
+      "required": ["forced_mines", "forced_safes"],
+      "properties": {
+        "forced_mines": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "forced_safes": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        }
+      }
+    }
+  }
+}

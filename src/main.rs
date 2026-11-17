@@ -1,3 +1,5 @@
+﻿#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod audio;
 mod coords;
 mod db;
@@ -708,7 +710,7 @@ impl MineShiftApp {
             ui.add_space(12.0);
 
             let chal_btn = egui::Button::new(
-                egui::RichText::new("🏆 MASTERY CHALLENGES")
+                egui::RichText::new("đźŹ† MASTERY CHALLENGES")
                     .size(19.0)
                     .strong()
                     .color(accent),
@@ -835,7 +837,7 @@ impl MineShiftApp {
 
                 let mode_text = match self.board.geometry {
                     minecore::board::Geometry::Square => {
-                        format!("SQUARE {}×{}", self.board.width, self.board.height)
+                        format!("SQUARE {}Ă—{}", self.board.width, self.board.height)
                     }
                     minecore::board::Geometry::Hex => format!("HEXAGON R{}", self.board.radius),
                 };
@@ -870,7 +872,7 @@ impl MineShiftApp {
                         .inner_margin(egui::vec2(10.0, 6.0))
                         .show(ui, |ui| {
                             ui.label(
-                                egui::RichText::new(format!("🏆 {}", title))
+                                egui::RichText::new(format!("đźŹ† {}", title))
                                     .size(13.0)
                                     .strong()
                                     .color(accent),
@@ -889,7 +891,7 @@ impl MineShiftApp {
                             .inner_margin(egui::vec2(8.0, 5.0))
                             .show(ui, |ui| {
                                 ui.label(
-                                    egui::RichText::new("🚫 NO FLAGS")
+                                    egui::RichText::new("đźš« NO FLAGS")
                                         .size(12.0)
                                         .strong()
                                         .color(danger),
@@ -906,7 +908,7 @@ impl MineShiftApp {
                             .show(ui, |ui| {
                                 ui.label(
                                     egui::RichText::new(format!(
-                                        "🚩 LIMITED: {}/{}",
+                                        "đźš© LIMITED: {}/{}",
                                         self.board.flags_placed, max_flags
                                     ))
                                     .size(12.0)
@@ -930,7 +932,7 @@ impl MineShiftApp {
                         .inner_margin(egui::vec2(8.0, 5.0))
                         .show(ui, |ui| {
                             ui.label(
-                                egui::RichText::new("🔵 RING-2 CLUES")
+                                egui::RichText::new("đź”µ RING-2 CLUES")
                                     .size(12.0)
                                     .strong()
                                     .color(egui::Color32::from_rgb(160, 110, 255)),
@@ -947,7 +949,7 @@ impl MineShiftApp {
                         .inner_margin(egui::vec2(8.0, 5.0))
                         .show(ui, |ui| {
                             ui.label(
-                                egui::RichText::new("✓ NO GUESS")
+                                egui::RichText::new("âś“ NO GUESS")
                                     .size(12.0)
                                     .strong()
                                     .color(success),
@@ -964,7 +966,7 @@ impl MineShiftApp {
                         .inner_margin(egui::vec2(8.0, 5.0))
                         .show(ui, |ui| {
                             ui.label(
-                                egui::RichText::new(format!("🔥 ×{} COMBO", self.blitz_combo))
+                                egui::RichText::new(format!("đź”Ą Ă—{} COMBO", self.blitz_combo))
                                     .size(12.0)
                                     .strong()
                                     .color(accent),
@@ -994,9 +996,9 @@ impl MineShiftApp {
                         self.board.status = GameStatus::Lost;
                         self.board.end_time = Some(std::time::Instant::now());
                     }
-                    format!("⏱ {:03.0}", remaining)
+                    format!("âŹ± {:03.0}", remaining)
                 } else {
-                    format!("⏱ {:03.0}", elapsed)
+                    format!("âŹ± {:03.0}", elapsed)
                 };
 
                 ui.label(
@@ -1013,7 +1015,7 @@ impl MineShiftApp {
                     mode::GameModeId::Blitz | mode::GameModeId::Sandbox
                 ) {
                     ui.label(
-                        egui::RichText::new(format!("⭐ {}", self.mode_state.score))
+                        egui::RichText::new(format!("â­ {}", self.mode_state.score))
                             .size(22.0)
                             .strong()
                             .color(accent),
@@ -1026,7 +1028,7 @@ impl MineShiftApp {
                     mode::GameModeId::Survival | mode::GameModeId::Expedition
                 ) {
                     ui.label(
-                        egui::RichText::new(format!("❤️ {}", self.mode_state.lives))
+                        egui::RichText::new(format!("âť¤ď¸Ź {}", self.mode_state.lives))
                             .size(22.0)
                             .strong()
                             .color(danger),
@@ -1036,7 +1038,7 @@ impl MineShiftApp {
 
                 let mines_left = self.board.mine_count as isize - self.board.flags_placed as isize;
                 ui.label(
-                    egui::RichText::new(format!("🚩 {}", mines_left))
+                    egui::RichText::new(format!("đźš© {}", mines_left))
                         .size(22.0)
                         .strong()
                         .color(danger),
@@ -1070,7 +1072,7 @@ impl MineShiftApp {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let restart_btn = egui::Button::new(
-                        egui::RichText::new("↻ Restart")
+                        egui::RichText::new("â†» Restart")
                             .size(15.0)
                             .strong()
                             .color(text_primary),
@@ -1122,7 +1124,7 @@ impl MineShiftApp {
                         && self.board.status == GameStatus::Playing
                     {
                         let hint_btn = egui::Button::new(
-                            egui::RichText::new("💡 Hint").size(15.0).color(accent),
+                            egui::RichText::new("đź’ˇ Hint").size(15.0).color(accent),
                         )
                         .fill(card_bg)
                         .stroke(egui::Stroke::new(1.0, border))
@@ -1162,7 +1164,7 @@ impl MineShiftApp {
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new("💡 LOGIC EXPLANATION")
+                            egui::RichText::new("đź’ˇ LOGIC EXPLANATION")
                                 .size(14.0)
                                 .strong()
                                 .color(accent),
@@ -1185,7 +1187,7 @@ impl MineShiftApp {
                             "Cell ({}, {}) is {}",
                             coords.0,
                             coords.1,
-                            if is_mine { "a MINE 🚩" } else { "SAFE 🟢" }
+                            if is_mine { "a MINE đźš©" } else { "SAFE đźź˘" }
                         );
                         ui.label(
                             egui::RichText::new(target_text)
@@ -1195,7 +1197,7 @@ impl MineShiftApp {
                         );
                         ui.add_space(6.0);
                         ui.label(
-                            egui::RichText::new(format!("— {}", hint.explanation_text))
+                            egui::RichText::new(format!("â€” {}", hint.explanation_text))
                                 .size(13.0)
                                 .color(text_muted),
                         );
@@ -1879,7 +1881,7 @@ impl MineShiftApp {
         if ui_tokens::screen_header(ui, "PLAYER PROFILES", text_primary, border, card_bg, |ui| {
             if ui
                 .button(
-                    egui::RichText::new("✨ Cosmetics")
+                    egui::RichText::new("âś¨ Cosmetics")
                         .size(15.0)
                         .strong()
                         .color(text_primary),
@@ -2104,7 +2106,7 @@ impl MineShiftApp {
                                 if !self.new_profile_name.trim().is_empty() {
                                     if let Some(ref db) = self.db {
                                         if let Ok(id) =
-                                            db.create_profile(self.new_profile_name.trim(), "👶")
+                                            db.create_profile(self.new_profile_name.trim(), "đź‘¶")
                                         {
                                             self.profiles = db.get_profiles().unwrap_or_default();
                                             if let Some(p) =
@@ -2388,7 +2390,7 @@ impl MineShiftApp {
                 .show(ui, |ui| {
                     ui.label(
                         egui::RichText::new(format!(
-                            "🏆 {} / {} Unlocked ({:.0}%)",
+                            "đźŹ† {} / {} Unlocked ({:.0}%)",
                             unlocked_count,
                             total_count,
                             progress_pct * 100.0
@@ -2496,9 +2498,9 @@ impl MineShiftApp {
                                         ui.horizontal(|ui| {
                                             ui.label(
                                                 egui::RichText::new(if is_unlocked {
-                                                    "🏆"
+                                                    "đźŹ†"
                                                 } else {
-                                                    "🔒"
+                                                    "đź”’"
                                                 })
                                                 .size(36.0),
                                             );
@@ -2580,7 +2582,7 @@ impl MineShiftApp {
         if ui_tokens::screen_header(ui, "GAME MODES", text_primary, border, card_bg, |ui| {
             if ui
                 .button(
-                    egui::RichText::new("🏆 Mastery Challenges")
+                    egui::RichText::new("đźŹ† Mastery Challenges")
                         .size(15.0)
                         .strong()
                         .color(accent),
@@ -2607,16 +2609,16 @@ impl MineShiftApp {
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
                     let modes = vec![
-                        (mode::GameModeId::Classic, "⬜", "SQUARE"),
-                        (mode::GameModeId::Classic, "⬡", "HEXAGON"),
-                        (mode::GameModeId::Sprint, "⚡", "SQUARE"),
-                        (mode::GameModeId::NoGuess, "🧠", "SQUARE"),
-                        (mode::GameModeId::Blitz, "🔥", "SQUARE"),
-                        (mode::GameModeId::Survival, "❤️", "SQUARE"),
-                        (mode::GameModeId::Daily, "📅", "SQUARE"),
-                        (mode::GameModeId::Expedition, "🗺️", "SQUARE"),
-                        (mode::GameModeId::Zen, "🧘", "SQUARE"),
-                        (mode::GameModeId::Sandbox, "⚙️", "SQUARE"),
+                        (mode::GameModeId::Classic, "â¬ś", "SQUARE"),
+                        (mode::GameModeId::Classic, "â¬ˇ", "HEXAGON"),
+                        (mode::GameModeId::Sprint, "âšˇ", "SQUARE"),
+                        (mode::GameModeId::NoGuess, "đź§ ", "SQUARE"),
+                        (mode::GameModeId::Blitz, "đź”Ą", "SQUARE"),
+                        (mode::GameModeId::Survival, "âť¤ď¸Ź", "SQUARE"),
+                        (mode::GameModeId::Daily, "đź“…", "SQUARE"),
+                        (mode::GameModeId::Expedition, "đź—şď¸Ź", "SQUARE"),
+                        (mode::GameModeId::Zen, "đź§", "SQUARE"),
+                        (mode::GameModeId::Sandbox, "âš™ď¸Ź", "SQUARE"),
                     ];
 
                     for (id, icon, variant) in modes {
@@ -2797,7 +2799,7 @@ impl MineShiftApp {
                         .map(|c| c.xp_reward)
                         .sum();
                     ui.label(
-                        egui::RichText::new(format!("⭐ +{} XP Earned", total_xp_earned))
+                        egui::RichText::new(format!("â­ +{} XP Earned", total_xp_earned))
                             .size(14.0)
                             .strong()
                             .color(accent),
@@ -2984,7 +2986,7 @@ impl MineShiftApp {
                                                 let topo_str = match c.ruleset.topology {
                                                     minecore::board::Geometry::Square => {
                                                         format!(
-                                                            "Square {}×{}",
+                                                            "Square {}Ă—{}",
                                                             c.ruleset.width, c.ruleset.height
                                                         )
                                                     }
@@ -2993,14 +2995,14 @@ impl MineShiftApp {
                                                     }
                                                 };
                                                 ui.label(
-                                                    egui::RichText::new(format!("📐 {}", topo_str))
+                                                    egui::RichText::new(format!("đź“ {}", topo_str))
                                                         .size(11.0)
                                                         .color(text_muted),
                                                 );
                                                 ui.add_space(8.0);
                                                 ui.label(
                                                     egui::RichText::new(format!(
-                                                        "💣 {} Mines",
+                                                        "đź’Ł {} Mines",
                                                         c.ruleset.mine_count
                                                     ))
                                                     .size(11.0)
@@ -3011,7 +3013,7 @@ impl MineShiftApp {
                                                     FlagPolicy::NoFlags => {
                                                         ui.add_space(8.0);
                                                         ui.label(
-                                                            egui::RichText::new("🚫 No Flags")
+                                                            egui::RichText::new("đźš« No Flags")
                                                                 .size(11.0)
                                                                 .strong()
                                                                 .color(self.theme.colors.danger()),
@@ -3021,7 +3023,7 @@ impl MineShiftApp {
                                                         ui.add_space(8.0);
                                                         ui.label(
                                                             egui::RichText::new(format!(
-                                                                "🚩 {} Flags",
+                                                                "đźš© {} Flags",
                                                                 max_flags
                                                             ))
                                                             .size(11.0)
@@ -3037,7 +3039,7 @@ impl MineShiftApp {
                                                 {
                                                     ui.add_space(8.0);
                                                     ui.label(
-                                                        egui::RichText::new("🔵 Ring-2 Clues")
+                                                        egui::RichText::new("đź”µ Ring-2 Clues")
                                                             .size(11.0)
                                                             .strong()
                                                             .color(egui::Color32::from_rgb(
@@ -3050,7 +3052,7 @@ impl MineShiftApp {
                                                     ui.add_space(8.0);
                                                     ui.label(
                                                         egui::RichText::new(format!(
-                                                            "⏱ < {:.0}s",
+                                                            "âŹ± < {:.0}s",
                                                             target
                                                         ))
                                                         .size(11.0)
@@ -3067,11 +3069,11 @@ impl MineShiftApp {
                                                     let best_text =
                                                         if let Some(rec) = completion_record {
                                                             format!(
-                                                                "✓ COMPLETED ({:.1}s)",
+                                                                "âś“ COMPLETED ({:.1}s)",
                                                                 rec.best_time_ms as f64 / 1000.0
                                                             )
                                                         } else {
-                                                            "✓ COMPLETED".to_string()
+                                                            "âś“ COMPLETED".to_string()
                                                         };
                                                     egui::Frame::new()
                                                         .fill(success.linear_multiply(0.2))
@@ -3191,7 +3193,7 @@ impl MineShiftApp {
                 .show(ui, |ui| {
                     ui_tokens::card_frame(card_bg, border, 12.0, 14.0).show(ui, |ui| {
                         ui.label(
-                            egui::RichText::new("🔬 Experimental Board Configuration")
+                            egui::RichText::new("đź”¬ Experimental Board Configuration")
                                 .size(17.0)
                                 .strong()
                                 .color(text_primary),
@@ -3312,7 +3314,7 @@ impl MineShiftApp {
                             }
                             ui.add_space(8.0);
 
-                            let no_btn = egui::Button::new(egui::RichText::new("🚫 Precision (No Flags)").strong().color(if is_none { egui::Color32::WHITE } else { text_primary }))
+                            let no_btn = egui::Button::new(egui::RichText::new("đźš« Precision (No Flags)").strong().color(if is_none { egui::Color32::WHITE } else { text_primary }))
                                 .fill(if is_none { accent } else { card_bg })
                                 .stroke(egui::Stroke::new(1.0, border))
                                 .corner_radius(6.0)
@@ -3322,7 +3324,7 @@ impl MineShiftApp {
                             }
                             ui.add_space(8.0);
 
-                            let ltd_btn = egui::Button::new(egui::RichText::new("🚩 Limited Flags").strong().color(if is_ltd { egui::Color32::WHITE } else { text_primary }))
+                            let ltd_btn = egui::Button::new(egui::RichText::new("đźš© Limited Flags").strong().color(if is_ltd { egui::Color32::WHITE } else { text_primary }))
                                 .fill(if is_ltd { accent } else { card_bg })
                                 .stroke(egui::Stroke::new(1.0, border))
                                 .corner_radius(6.0)
@@ -3358,7 +3360,7 @@ impl MineShiftApp {
                             ui.add_space(8.0);
 
                             let is_r2_clue = self.sandbox_clue_policy == CluePolicy::ExtendedRing2;
-                            let r2_c_btn = egui::Button::new(egui::RichText::new("🔵 Extended Ring-2 Clues (Distance 2)").strong().color(if is_r2_clue { egui::Color32::WHITE } else { text_primary }))
+                            let r2_c_btn = egui::Button::new(egui::RichText::new("đź”µ Extended Ring-2 Clues (Distance 2)").strong().color(if is_r2_clue { egui::Color32::WHITE } else { text_primary }))
                                 .fill(if is_r2_clue { accent } else { card_bg })
                                 .stroke(egui::Stroke::new(1.0, border))
                                 .corner_radius(6.0)
@@ -3386,7 +3388,7 @@ impl MineShiftApp {
                             ui.add_space(8.0);
 
                             let is_cert = self.sandbox_logic_guarantee == LogicGuarantee::CertifiedNoGuess;
-                            let cert_btn = egui::Button::new(egui::RichText::new("✓ Certified Solvable (No Guess)").strong().color(if is_cert { egui::Color32::WHITE } else { text_primary }))
+                            let cert_btn = egui::Button::new(egui::RichText::new("âś“ Certified Solvable (No Guess)").strong().color(if is_cert { egui::Color32::WHITE } else { text_primary }))
                                 .fill(if is_cert { accent } else { card_bg })
                                 .stroke(egui::Stroke::new(1.0, border))
                                 .corner_radius(6.0)
@@ -3400,7 +3402,7 @@ impl MineShiftApp {
 
                         // Launch Button
                         let launch_btn = egui::Button::new(
-                            egui::RichText::new("🚀 LAUNCH EXPERIMENT")
+                            egui::RichText::new("đźš€ LAUNCH EXPERIMENT")
                                 .size(17.0)
                                 .strong()
                                 .color(egui::Color32::WHITE),
@@ -3524,7 +3526,7 @@ impl MineShiftApp {
             |ui| {
                 if ui
                     .button(
-                        egui::RichText::new("✨ Profile Cosmetics")
+                        egui::RichText::new("âś¨ Profile Cosmetics")
                             .size(15.0)
                             .strong()
                             .color(text_primary),
@@ -3575,7 +3577,7 @@ impl MineShiftApp {
                         let btn = egui::Button::new(
                             egui::RichText::new(format!(
                                 "{}  {}",
-                                if is_active { "●" } else { "○" },
+                                if is_active { "â—Ź" } else { "â—‹" },
                                 &preset.name
                             ))
                             .size(15.0)
@@ -3620,7 +3622,7 @@ impl MineShiftApp {
                                     let btn = egui::Button::new(
                                         egui::RichText::new(format!(
                                             "{}  {}",
-                                            if is_active { "●" } else { "○" },
+                                            if is_active { "â—Ź" } else { "â—‹" },
                                             &name
                                         ))
                                         .size(15.0)
@@ -3705,7 +3707,7 @@ impl MineShiftApp {
                     if self.theme.is_custom {
                         ui.add_space(6.0);
                         if ui
-                            .add_sized([208.0, 32.0], egui::Button::new("💾 Save to Profile"))
+                            .add_sized([208.0, 32.0], egui::Button::new("đź’ľ Save to Profile"))
                             .clicked()
                         {
                             if let Some(ref prof) = self.active_profile {
@@ -3745,9 +3747,9 @@ impl MineShiftApp {
                     // Tab bar: Colors | Geometry | Numbers
                     ui.horizontal(|ui| {
                         let tabs = [
-                            (ThemeStudioTab::Colors, "🎨 Colors"),
-                            (ThemeStudioTab::Geometry, "📐 Geometry"),
-                            (ThemeStudioTab::Numbers, "🔢 Numbers"),
+                            (ThemeStudioTab::Colors, "đźŽ¨ Colors"),
+                            (ThemeStudioTab::Geometry, "đź“ Geometry"),
+                            (ThemeStudioTab::Numbers, "đź”˘ Numbers"),
                         ];
                         for (tab, label) in tabs {
                             let is_active = self.theme_studio_tab == tab;
@@ -3899,7 +3901,7 @@ impl MineShiftApp {
 
                     // 1. Square Preview Grid (5x3 realistic board)
                     ui.label(
-                        egui::RichText::new("Square Grid (5×3):")
+                        egui::RichText::new("Square Grid (5Ă—3):")
                             .size(15.0)
                             .strong()
                             .color(text_primary),
@@ -4305,7 +4307,7 @@ impl MineShiftApp {
                                         ui.label(egui::RichText::new(&prof.avatar_id).size(42.0));
                                         ui.vertical(|ui| {
                                             ui.label(egui::RichText::new(&prof.display_name).size(22.0).strong().color(text_primary));
-                                            ui.label(egui::RichText::new(format!("Level {} • {} XP", prof.current_level, prof.total_xp)).size(14.0).color(accent));
+                                            ui.label(egui::RichText::new(format!("Level {} â€˘ {} XP", prof.current_level, prof.total_xp)).size(14.0).color(accent));
                                         });
                                     });
                                 } else {
@@ -4333,9 +4335,9 @@ impl MineShiftApp {
                                     }
                                     ui.add_space(8.0);
                                     if self.settings.cursor.reduced_motion {
-                                        ui.label(egui::RichText::new("⚠ Suppressed by Reduced Motion setting").size(13.0).color(self.theme.colors.danger()));
+                                        ui.label(egui::RichText::new("âš  Suppressed by Reduced Motion setting").size(13.0).color(self.theme.colors.danger()));
                                     } else if self.settings.screen_shake <= 0.01 {
-                                        ui.label(egui::RichText::new("⚠ Intensity is 0% — increase slider to test impulse").size(13.0).color(text_muted));
+                                        ui.label(egui::RichText::new("âš  Intensity is 0% â€” increase slider to test impulse").size(13.0).color(text_muted));
                                     } else if self.shake.trauma > 0.02 {
                                         let trauma_pct = (self.shake.trauma * 100.0) as u32;
                                         ui.label(egui::RichText::new(format!("Impulse active (Trauma: {}%)", trauma_pct)).size(13.0).strong().color(accent));
@@ -4359,7 +4361,7 @@ impl MineShiftApp {
                                     ui.painter().text(
                                         transformed_rect.center(),
                                         egui::Align2::CENTER_CENTER,
-                                        if is_shaking { "⚡ SHAKING IMPULSE ACTIVE ⚡" } else { "Simulated Target (Reacts to screen shake impulse)" },
+                                        if is_shaking { "âšˇ SHAKING IMPULSE ACTIVE âšˇ" } else { "Simulated Target (Reacts to screen shake impulse)" },
                                         egui::FontId::proportional(13.0),
                                         if is_shaking { accent } else { text_muted },
                                     );
@@ -4443,7 +4445,7 @@ impl MineShiftApp {
                                 for (id, name) in presets {
                                     let is_active = self.theme.id == id;
                                     let btn = egui::Button::new(
-                                        egui::RichText::new(format!("{}  {}", if is_active { "●" } else { "○" }, name))
+                                        egui::RichText::new(format!("{}  {}", if is_active { "â—Ź" } else { "â—‹" }, name))
                                             .size(16.0)
                                             .strong()
                                             .color(if is_active { egui::Color32::WHITE } else { text_primary })
@@ -4595,7 +4597,7 @@ impl MineShiftApp {
                                     .color(text_primary),
                             );
                             ui.add_space(8.0);
-                            let avatars = ["🧑", "👽", "🤖", "🎭", "💾", "⚡", "🔮", "🎮"];
+                            let avatars = ["đź§‘", "đź‘˝", "đź¤–", "đźŽ­", "đź’ľ", "âšˇ", "đź”®", "đźŽ®"];
                             egui::Grid::new("avatar_grid")
                                 .spacing(egui::vec2(10.0, 10.0))
                                 .show(ui, |ui| {
@@ -4636,10 +4638,10 @@ impl MineShiftApp {
                             ui.add_space(8.0);
                             let badges = [
                                 "None",
-                                "🌟 Pioneer",
-                                "🔥 Streak",
-                                "🏆 Champion",
-                                "⚔️ Veteran",
+                                "đźŚź Pioneer",
+                                "đź”Ą Streak",
+                                "đźŹ† Champion",
+                                "âš”ď¸Ź Veteran",
                             ];
                             for badge in badges {
                                 let is_sel = prof.badge_id == badge;
@@ -5045,3 +5047,4 @@ impl eframe::App for MineShiftApp {
         }
     }
 }
+

@@ -1,4 +1,4 @@
-; Inno Setup Script for MINE//SHIFT: BEYOND — Windows 1.0 Edition
+﻿; Inno Setup Script for MINE//SHIFT: BEYOND â€” Windows 1.0 Edition
 #define MyAppName "MINE//SHIFT: BEYOND"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Antigravity Games"
@@ -10,7 +10,7 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\MineShift Beyond
-DefaultGroupName={#MyAppName}
+DefaultGroupName=MineShift
 AllowNoIcons=yes
 OutputDir=..\dist\installer
 OutputBaseFilename=MineShift-v1.0.0-Setup
@@ -24,7 +24,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\assets\app.ico
 VersionInfoVersion=1.0.0.0
 VersionInfoCompany={#MyAppPublisher}
-VersionInfoDescription=MINE//SHIFT: BEYOND — Native Windows Puzzle Platform
+VersionInfoDescription=MINE//SHIFT: BEYOND â€” Native Windows Puzzle Platform
 VersionInfoProductTextVersion=1.0.0
 
 [Languages]
@@ -46,3 +46,4 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+

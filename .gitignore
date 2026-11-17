@@ -1,9 +1,6 @@
-/target
-polyglot/**/*.exe
-polyglot/**/*.obj
-polyglot/**/*.pdb
-polyglot/**/*.class
+﻿target/
+dist/
+*.exe
+*.zip
+.DS_Store
 
-
-__pycache__/
-*.pyc

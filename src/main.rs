@@ -67,10 +67,17 @@ fn main() -> Result<(), eframe::Error> {
         i += 1;
     }
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("MINE//SHIFT: BEYOND")
+        .with_inner_size([width, height])
+        .with_min_inner_size([600.0, 400.0]);
+
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")) {
+        viewport = viewport.with_icon(icon);
+    }
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([width, height])
-            .with_min_inner_size([600.0, 400.0]),
+        viewport,
         ..Default::default()
     };
 
